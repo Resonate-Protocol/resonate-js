@@ -1,0 +1,34 @@
+{
+  "name": "resonate-js",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "TypeScript client library for the Resonate synchronized audio protocol",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "resonate",
+    "audio",
+    "streaming",
+    "synchronized",
+    "music-assistant"
+  ],
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
