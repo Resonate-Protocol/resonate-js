@@ -2,6 +2,7 @@ import { AudioProcessor } from "./audio-processor";
 import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
+import { ResonateTimeFilter } from "@/helpers/ResonateTimeFilter";
 import type { ResonatePlayerConfig, PlayerState, StreamFormat } from "./types";
 
 export class ResonatePlayer {
@@ -9,12 +10,16 @@ export class ResonatePlayer {
   private audioProcessor: AudioProcessor;
   private protocolHandler: ProtocolHandler;
   private stateManager: StateManager;
+  private timeFilter: ResonateTimeFilter;
 
   private config: ResonatePlayerConfig;
   private wsUrl: string = "";
 
   constructor(config: ResonatePlayerConfig) {
     this.config = config;
+
+    // Initialize time filter (shared between audio processor and protocol handler)
+    this.timeFilter = new ResonateTimeFilter();
 
     // Initialize state manager with callback
     this.stateManager = new StateManager(config.onStateChange);
@@ -24,6 +29,7 @@ export class ResonatePlayer {
       config.audioElement,
       config.isAndroid,
       this.stateManager,
+      this.timeFilter,
     );
 
     // Initialize WebSocket manager
@@ -35,6 +41,7 @@ export class ResonatePlayer {
       this.wsManager,
       this.audioProcessor,
       this.stateManager,
+      this.timeFilter,
     );
   }
 
@@ -80,7 +87,7 @@ export class ResonatePlayer {
     this.audioProcessor.close();
 
     // Reset time filter
-    this.protocolHandler.resetTimeFilter();
+    this.timeFilter.reset();
 
     // Reset state
     this.stateManager.reset();

@@ -1,5 +1,6 @@
 import type { AudioBufferQueueItem, StreamFormat } from "./types";
 import type { StateManager } from "./state-manager";
+import type { ResonateTimeFilter } from "@/helpers/ResonateTimeFilter";
 import almostSilentMp3 from "@/assets/almost_silent.mp3";
 
 export class AudioProcessor {
@@ -14,6 +15,7 @@ export class AudioProcessor {
     private audioElement: HTMLAudioElement,
     private isAndroid: boolean,
     private stateManager: StateManager,
+    private timeFilter: ResonateTimeFilter,
   ) {}
 
   // Initialize AudioContext with platform-specific setup
@@ -254,37 +256,45 @@ export class AudioProcessor {
     // Sort queue by server timestamp to ensure proper ordering
     this.audioBufferQueue.sort((a, b) => a.serverTime - b.serverTime);
 
-    // Capture currentTime ONCE at the start of scheduling
-    const currentTime = this.audioContext.currentTime;
-
-    // If this is the first batch and we haven't established the anchor yet,
-    // use the EARLIEST chunk's timestamp as the anchor (not the first one we process)
-    if (
-      this.stateManager.streamStartServerTime === 0 &&
-      this.audioBufferQueue.length > 0
-    ) {
-      const earliestChunk = this.audioBufferQueue[0];
-      this.stateManager.streamStartServerTime = earliestChunk.serverTime;
-      this.stateManager.streamStartAudioTime = currentTime + 0.2;
+    // Don't schedule until time sync is ready
+    if (!this.timeFilter.is_synchronized) {
+      console.log("Resonate: Waiting for time sync before scheduling audio");
+      return;
     }
+
+    // Capture times ONCE at the start of scheduling
+    const audioContextTime = this.audioContext.currentTime;
+    const nowUs = performance.now() * 1000;
+
+    // Buffer to add for scheduling headroom (200ms)
+    const bufferSec = 0.2;
 
     // Schedule all chunks in the queue
     while (this.audioBufferQueue.length > 0) {
       const chunk = this.audioBufferQueue.shift()!;
 
-      // Calculate time offset from first chunk (in microseconds)
-      const offsetUs =
-        chunk.serverTime - this.stateManager.streamStartServerTime;
-      const offsetSec = offsetUs / 1_000_000;
-      const playbackTime = this.stateManager.streamStartAudioTime + offsetSec;
+      // Convert server timestamp to client time using synchronized clock
+      const chunkClientTimeUs = this.timeFilter.computeClientTime(
+        chunk.serverTime,
+      );
 
-      // Schedule playback (ensure we don't schedule in the past)
-      const scheduleTime = Math.max(playbackTime, currentTime);
+      // Calculate how far in the future this chunk should play
+      const deltaUs = chunkClientTimeUs - nowUs;
+      const deltaSec = deltaUs / 1_000_000;
+
+      // Schedule relative to current AudioContext time
+      const playbackTime = audioContextTime + deltaSec + bufferSec;
+
+      // Drop chunks that arrived too late
+      if (playbackTime < audioContextTime) {
+        console.log("Resonate: Dropping late audio chunk");
+        continue;
+      }
 
       const source = this.audioContext.createBufferSource();
       source.buffer = chunk.buffer;
       source.connect(this.gainNode);
-      source.start(scheduleTime);
+      source.start(playbackTime);
 
       this.scheduledSources.push(source);
       source.onended = () => {

@@ -1,4 +1,4 @@
-import { ResonateTimeFilter } from "@/helpers/ResonateTimeFilter";
+import type { ResonateTimeFilter } from "@/helpers/ResonateTimeFilter";
 import type {
   ClientHello,
   ClientState,
@@ -18,13 +18,12 @@ const TIME_SYNC_INTERVAL = 5000; // 5 seconds
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 
 export class ProtocolHandler {
-  private timeFilter = new ResonateTimeFilter();
-
   constructor(
     private playerId: string,
     private wsManager: WebSocketManager,
     private audioProcessor: AudioProcessor,
     private stateManager: StateManager,
+    private timeFilter: ResonateTimeFilter,
   ) {}
 
   // Handle WebSocket messages
@@ -322,10 +321,5 @@ export class ProtocolHandler {
       },
     };
     this.wsManager.send(message);
-  }
-
-  // Reset time filter
-  resetTimeFilter(): void {
-    this.timeFilter.reset();
   }
 }
