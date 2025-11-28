@@ -2,7 +2,7 @@ import { AudioProcessor } from "./audio-processor";
 import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
-import { ResonateTimeFilter } from "@/helpers/ResonateTimeFilter";
+import { ResonateTimeFilter } from "./time-filter";
 import type { ResonatePlayerConfig, PlayerState, StreamFormat } from "./types";
 
 export class ResonatePlayer {
@@ -24,12 +24,17 @@ export class ResonatePlayer {
     // Initialize state manager with callback
     this.stateManager = new StateManager(config.onStateChange);
 
+    // Determine output mode (default to media-element if audioElement provided, otherwise direct)
+    const outputMode = config.audioOutputMode ?? (config.audioElement ? "media-element" : "direct");
+
     // Initialize audio processor
     this.audioProcessor = new AudioProcessor(
-      config.audioElement,
-      config.isAndroid,
       this.stateManager,
       this.timeFilter,
+      outputMode,
+      config.audioElement,
+      config.isAndroid ?? false,
+      config.silentAudioSrc,
     );
 
     // Initialize WebSocket manager
@@ -42,6 +47,11 @@ export class ResonatePlayer {
       this.audioProcessor,
       this.stateManager,
       this.timeFilter,
+      {
+        clientName: config.clientName,
+        supportedFormats: config.supportedFormats,
+        bufferCapacity: config.bufferCapacity,
+      },
     );
   }
 
@@ -92,8 +102,10 @@ export class ResonatePlayer {
     // Reset state
     this.stateManager.reset();
 
-    // Reset MediaSession playbackState (but keep Android loop playing if needed)
-    navigator.mediaSession.playbackState = "none";
+    // Reset MediaSession playbackState (if available)
+    if (typeof navigator !== "undefined" && navigator.mediaSession) {
+      navigator.mediaSession.playbackState = "none";
+    }
   }
 
   // Set volume (0-100)
@@ -134,7 +146,17 @@ export class ResonatePlayer {
   get isConnected(): boolean {
     return this.wsManager.isConnected();
   }
+
+  // Time sync info for debugging
+  get timeSyncInfo(): { synced: boolean; offset: number; error: number } {
+    return {
+      synced: this.timeFilter.is_synchronized,
+      offset: Math.round(this.timeFilter.offset / 1000), // ms
+      error: Math.round(this.timeFilter.error / 1000), // ms
+    };
+  }
 }
 
 // Re-export types for convenience
 export * from "./types";
+export { ResonateTimeFilter } from "./time-filter";

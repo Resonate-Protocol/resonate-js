@@ -1,4 +1,4 @@
-import type { ResonateTimeFilter } from "@/helpers/ResonateTimeFilter";
+import type { ResonateTimeFilter } from "./time-filter";
 import type {
   ClientHello,
   ClientState,
@@ -8,6 +8,7 @@ import type {
   ServerMessage,
   StreamStart,
   StreamUpdate,
+  SupportedFormat,
 } from "./types";
 import type { AudioProcessor } from "./audio-processor";
 import type { StateManager } from "./state-manager";
@@ -17,14 +18,29 @@ import type { WebSocketManager } from "./websocket-manager";
 const TIME_SYNC_INTERVAL = 5000; // 5 seconds
 const STATE_UPDATE_INTERVAL = 5000; // 5 seconds
 
+export interface ProtocolHandlerConfig {
+  clientName?: string;
+  supportedFormats?: SupportedFormat[];
+  bufferCapacity?: number;
+}
+
 export class ProtocolHandler {
+  private clientName: string;
+  private supportedFormats?: SupportedFormat[];
+  private bufferCapacity: number;
+
   constructor(
     private playerId: string,
     private wsManager: WebSocketManager,
     private audioProcessor: AudioProcessor,
     private stateManager: StateManager,
     private timeFilter: ResonateTimeFilter,
-  ) {}
+    config: ProtocolHandlerConfig = {},
+  ) {
+    this.clientName = config.clientName ?? "Resonate Player";
+    this.supportedFormats = config.supportedFormats;
+    this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
+  }
 
   // Handle WebSocket messages
   handleMessage(event: MessageEvent): void {
@@ -146,8 +162,10 @@ export class ProtocolHandler {
     // Ensure audio element is playing for MediaSession
     this.audioProcessor.startAudioElement();
 
-    // Explicitly set playbackState for Android
-    navigator.mediaSession.playbackState = "playing";
+    // Explicitly set playbackState for Android (if mediaSession available)
+    if (typeof navigator !== "undefined" && navigator.mediaSession) {
+      navigator.mediaSession.playbackState = "playing";
+    }
   }
 
   // Handle stream update
@@ -178,8 +196,10 @@ export class ProtocolHandler {
     // Stop audio element (except on Android where silent loop continues)
     this.audioProcessor.stopAudioElement();
 
-    // Explicitly set playbackState
-    navigator.mediaSession.playbackState = "paused";
+    // Explicitly set playbackState (if mediaSession available)
+    if (typeof navigator !== "undefined" && navigator.mediaSession) {
+      navigator.mediaSession.playbackState = "paused";
+    }
 
     // Send state update to server
     this.sendStateUpdate();
@@ -218,17 +238,17 @@ export class ProtocolHandler {
       type: "client/hello" as MessageType.CLIENT_HELLO,
       payload: {
         client_id: this.playerId,
-        name: "Music Assistant Web Player",
+        name: this.clientName,
         version: 1,
         supported_roles: ["player"],
         device_info: {
           product_name: "Web Browser",
-          manufacturer: navigator.vendor || "Unknown",
-          software_version: navigator.userAgent,
+          manufacturer: (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
+          software_version: (typeof navigator !== "undefined" && navigator.userAgent) || "Unknown",
         },
         player_support: {
-          supported_formats: this.getSupportedFormats(),
-          buffer_capacity: 1024 * 1024 * 5, // 5MB buffer
+          supported_formats: this.supportedFormats ?? this.getDefaultSupportedFormats(),
+          buffer_capacity: this.bufferCapacity,
           supported_commands: ["volume", "mute"],
         },
       },
@@ -236,8 +256,8 @@ export class ProtocolHandler {
     this.wsManager.send(hello);
   }
 
-  // Get supported audio formats based on browser
-  private getSupportedFormats(): Array<{
+  // Get default supported audio formats based on browser capabilities
+  private getDefaultSupportedFormats(): Array<{
     codec: string;
     channels: number;
     sample_rate: number;
@@ -245,7 +265,8 @@ export class ProtocolHandler {
   }> {
     // Safari has limited codec support, only use PCM for Safari
     // TODO: add flac support for Safari
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
 
     if (isSafari) {
       return [

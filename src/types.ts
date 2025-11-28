@@ -146,11 +146,61 @@ export type StreamFormat = {
 
 export type PlayerState = "synchronized" | "error";
 
+export type AudioOutputMode = "direct" | "media-element";
+
+export interface SupportedFormat {
+  codec: string;
+  channels: number;
+  sample_rate: number;
+  bit_depth: number;
+}
+
 export interface ResonatePlayerConfig {
+  /** Unique player identifier */
   playerId: string;
+
+  /** Base URL of the Resonate server (e.g., "http://192.168.1.100:8095") */
   baseUrl: string;
-  audioElement: HTMLAudioElement;
-  isAndroid: boolean;
+
+  /** Human-readable name for this player */
+  clientName?: string;
+
+  /**
+   * Audio output mode:
+   * - "direct": Output directly to audioContext.destination (e.g., Cast receiver)
+   * - "media-element": Use HTMLAudioElement for MediaSession support (e.g., mobile browsers)
+   */
+  audioOutputMode?: AudioOutputMode;
+
+  /**
+   * HTMLAudioElement for media-element output mode.
+   * Required when audioOutputMode is "media-element".
+   */
+  audioElement?: HTMLAudioElement;
+
+  /**
+   * Whether running on Android (affects MediaSession workarounds).
+   * Only relevant for "media-element" output mode.
+   */
+  isAndroid?: boolean;
+
+  /**
+   * Almost-silent audio data URL for Android MediaSession workaround.
+   * Required for Android when audioOutputMode is "media-element".
+   */
+  silentAudioSrc?: string;
+
+  /**
+   * Supported audio formats. If not provided, defaults based on output mode.
+   */
+  supportedFormats?: SupportedFormat[];
+
+  /**
+   * Buffer capacity in bytes. Defaults to 5MB for media-element, 1.5MB for direct.
+   */
+  bufferCapacity?: number;
+
+  /** Callback when player state changes */
   onStateChange?: (state: {
     isPlaying: boolean;
     volume: number;

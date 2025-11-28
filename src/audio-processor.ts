@@ -1,7 +1,6 @@
-import type { AudioBufferQueueItem, StreamFormat } from "./types";
+import type { AudioBufferQueueItem, StreamFormat, AudioOutputMode } from "./types";
 import type { StateManager } from "./state-manager";
-import type { ResonateTimeFilter } from "@/helpers/ResonateTimeFilter";
-import almostSilentMp3 from "@/assets/almost_silent.mp3";
+import type { ResonateTimeFilter } from "./time-filter";
 
 export class AudioProcessor {
   private audioContext: AudioContext | null = null;
@@ -12,10 +11,12 @@ export class AudioProcessor {
   private queueProcessTimeout: number | null = null;
 
   constructor(
-    private audioElement: HTMLAudioElement,
-    private isAndroid: boolean,
     private stateManager: StateManager,
     private timeFilter: ResonateTimeFilter,
+    private outputMode: AudioOutputMode = "direct",
+    private audioElement?: HTMLAudioElement,
+    private isAndroid: boolean = false,
+    private silentAudioSrc?: string,
   ) {}
 
   // Initialize AudioContext with platform-specific setup
@@ -29,38 +30,43 @@ export class AudioProcessor {
     this.audioContext = new AudioContext({ sampleRate: streamSampleRate });
     this.gainNode = this.audioContext.createGain();
 
-    if (this.isAndroid) {
-      // Android MediaSession workaround: Play almost-silent audio file
-      // Android browsers don't support MediaSession with MediaStream from Web Audio API
-      // Solution: Loop almost-silent audio to keep MediaSession active
-      // Real audio plays through Web Audio API → audioContext.destination
+    if (this.outputMode === "direct") {
+      // Direct output to audioContext.destination (e.g., Cast receiver)
       this.gainNode.connect(this.audioContext.destination);
+    } else if (this.outputMode === "media-element" && this.audioElement) {
+      if (this.isAndroid && this.silentAudioSrc) {
+        // Android MediaSession workaround: Play almost-silent audio file
+        // Android browsers don't support MediaSession with MediaStream from Web Audio API
+        // Solution: Loop almost-silent audio to keep MediaSession active
+        // Real audio plays through Web Audio API → audioContext.destination
+        this.gainNode.connect(this.audioContext.destination);
 
-      // Use almost-silent audio file to trick Android into showing MediaSession
-      this.audioElement.src = almostSilentMp3;
-      this.audioElement.loop = true;
-      // CRITICAL: Do NOT mute - Android requires audible audio for MediaSession
-      this.audioElement.muted = false;
-      // Set volume to 100% (the file itself is almost silent)
-      this.audioElement.volume = 1.0;
-      // Start playing to activate MediaSession
-      this.audioElement.play().catch((e) => {
-        console.warn("Resonate: Audio autoplay blocked:", e);
-      });
-    } else {
-      // iOS/Desktop: Use MediaStream approach for background playback
-      // Create MediaStreamDestination to bridge Web Audio API to HTML5 audio element
-      this.streamDestination = this.audioContext.createMediaStreamDestination();
-      this.gainNode.connect(this.streamDestination);
-      // Do NOT connect to audioContext.destination to avoid echo
+        // Use almost-silent audio file to trick Android into showing MediaSession
+        this.audioElement.src = this.silentAudioSrc;
+        this.audioElement.loop = true;
+        // CRITICAL: Do NOT mute - Android requires audible audio for MediaSession
+        this.audioElement.muted = false;
+        // Set volume to 100% (the file itself is almost silent)
+        this.audioElement.volume = 1.0;
+        // Start playing to activate MediaSession
+        this.audioElement.play().catch((e) => {
+          console.warn("Resonate: Audio autoplay blocked:", e);
+        });
+      } else {
+        // iOS/Desktop: Use MediaStream approach for background playback
+        // Create MediaStreamDestination to bridge Web Audio API to HTML5 audio element
+        this.streamDestination = this.audioContext.createMediaStreamDestination();
+        this.gainNode.connect(this.streamDestination);
+        // Do NOT connect to audioContext.destination to avoid echo
 
-      // Connect to HTML5 audio element for iOS background playback
-      this.audioElement.srcObject = this.streamDestination.stream;
-      this.audioElement.volume = 1.0;
-      // Start playing to activate MediaSession
-      this.audioElement.play().catch((e) => {
-        console.warn("Resonate: Audio autoplay blocked:", e);
-      });
+        // Connect to HTML5 audio element for iOS background playback
+        this.audioElement.srcObject = this.streamDestination.stream;
+        this.audioElement.volume = 1.0;
+        // Start playing to activate MediaSession
+        this.audioElement.play().catch((e) => {
+          console.warn("Resonate: Audio autoplay blocked:", e);
+        });
+      }
     }
 
     this.updateVolume();
@@ -306,18 +312,24 @@ export class AudioProcessor {
 
   // Start audio element playback (for MediaSession)
   startAudioElement(): void {
-    if (this.audioElement.paused) {
-      this.audioElement.play().catch((e) => {
-        console.warn("Resonate: Failed to start audio element:", e);
-      });
+    if (this.outputMode === "media-element" && this.audioElement) {
+      if (this.audioElement.paused) {
+        this.audioElement.play().catch((e) => {
+          console.warn("Resonate: Failed to start audio element:", e);
+        });
+      }
     }
+    // No-op for direct mode
   }
 
   // Stop audio element playback (for MediaSession)
   stopAudioElement(): void {
-    if (!this.isAndroid && !this.audioElement.paused) {
-      this.audioElement.pause();
+    if (this.outputMode === "media-element" && this.audioElement && !this.isAndroid) {
+      if (!this.audioElement.paused) {
+        this.audioElement.pause();
+      }
     }
+    // No-op for direct mode or Android
   }
 
   // Clear all audio buffers and scheduled sources
@@ -357,8 +369,8 @@ export class AudioProcessor {
     this.gainNode = null;
     this.streamDestination = null;
 
-    // Stop and clear the audio element
-    if (!this.isAndroid) {
+    // Stop and clear the audio element (only for non-Android media-element mode)
+    if (this.outputMode === "media-element" && this.audioElement && !this.isAndroid) {
       this.audioElement.pause();
       this.audioElement.srcObject = null;
     }
