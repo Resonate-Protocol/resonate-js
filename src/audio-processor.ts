@@ -22,6 +22,7 @@ export class AudioProcessor {
     private isAndroid: boolean = false,
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
+    private useHardwareVolume: boolean = false,
   ) {}
 
   // Update sync delay at runtime
@@ -96,6 +97,12 @@ export class AudioProcessor {
   // Update volume based on current state
   updateVolume(): void {
     if (!this.gainNode) return;
+
+    // Hardware volume mode: keep software gain at 1.0, external handles volume
+    if (this.useHardwareVolume) {
+      this.gainNode.gain.value = 1.0;
+      return;
+    }
 
     if (this.stateManager.muted) {
       this.gainNode.gain.value = 0;

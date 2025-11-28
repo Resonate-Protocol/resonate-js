@@ -22,12 +22,18 @@ export interface ProtocolHandlerConfig {
   clientName?: string;
   supportedFormats?: SupportedFormat[];
   bufferCapacity?: number;
+  useHardwareVolume?: boolean;
+  onVolumeCommand?: (volume: number, muted: boolean) => void;
+  getExternalVolume?: () => { volume: number; muted: boolean };
 }
 
 export class ProtocolHandler {
   private clientName: string;
   private supportedFormats?: SupportedFormat[];
   private bufferCapacity: number;
+  private useHardwareVolume: boolean;
+  private onVolumeCommand?: (volume: number, muted: boolean) => void;
+  private getExternalVolume?: () => { volume: number; muted: boolean };
 
   constructor(
     private playerId: string,
@@ -40,6 +46,9 @@ export class ProtocolHandler {
     this.clientName = config.clientName ?? "Resonate Player";
     this.supportedFormats = config.supportedFormats;
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
+    this.useHardwareVolume = config.useHardwareVolume ?? false;
+    this.onVolumeCommand = config.onVolumeCommand;
+    this.getExternalVolume = config.getExternalVolume;
   }
 
   // Handle WebSocket messages
@@ -216,6 +225,10 @@ export class ProtocolHandler {
         if (playerCommand.volume !== undefined) {
           this.stateManager.volume = playerCommand.volume;
           this.audioProcessor.updateVolume();
+          // Notify external handler for hardware volume
+          if (this.useHardwareVolume && this.onVolumeCommand) {
+            this.onVolumeCommand(playerCommand.volume, this.stateManager.muted);
+          }
         }
         break;
 
@@ -224,6 +237,10 @@ export class ProtocolHandler {
         if (playerCommand.mute !== undefined) {
           this.stateManager.muted = playerCommand.mute;
           this.audioProcessor.updateVolume();
+          // Notify external handler for hardware volume
+          if (this.useHardwareVolume && this.onVolumeCommand) {
+            this.onVolumeCommand(this.stateManager.volume, playerCommand.mute);
+          }
         }
         break;
     }
@@ -331,13 +348,22 @@ export class ProtocolHandler {
 
   // Send state update
   sendStateUpdate(): void {
+    // Get volume from external source if using hardware volume
+    let volume = this.stateManager.volume;
+    let muted = this.stateManager.muted;
+    if (this.useHardwareVolume && this.getExternalVolume) {
+      const externalVol = this.getExternalVolume();
+      volume = externalVol.volume;
+      muted = externalVol.muted;
+    }
+
     const message: ClientState = {
       type: "client/state" as MessageType.CLIENT_STATE,
       payload: {
         player: {
           state: this.stateManager.playerState,
-          volume: this.stateManager.volume,
-          muted: this.stateManager.muted,
+          volume,
+          muted,
         },
       },
     };

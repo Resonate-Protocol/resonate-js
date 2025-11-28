@@ -36,6 +36,7 @@ export class ResonatePlayer {
       config.isAndroid ?? false,
       config.silentAudioSrc,
       config.syncDelay ?? 0,
+      config.useHardwareVolume ?? false,
     );
 
     // Initialize WebSocket manager
@@ -52,6 +53,9 @@ export class ResonatePlayer {
         clientName: config.clientName,
         supportedFormats: config.supportedFormats,
         bufferCapacity: config.bufferCapacity,
+        useHardwareVolume: config.useHardwareVolume,
+        onVolumeCommand: config.onVolumeCommand,
+        getExternalVolume: config.getExternalVolume,
       },
     );
   }

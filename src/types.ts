@@ -214,6 +214,27 @@ export interface ResonatePlayerConfig {
     muted: boolean;
     playerState: PlayerState;
   }) => void;
+
+  /**
+   * Use hardware/external volume control instead of software gain.
+   * When true, the internal gain node stays at 1.0 and volume commands
+   * are delegated to the onVolumeCommand callback.
+   */
+  useHardwareVolume?: boolean;
+
+  /**
+   * Callback when server sends volume/mute commands.
+   * Only called when useHardwareVolume is true.
+   * The app should apply the volume to hardware (e.g., Cast system volume).
+   */
+  onVolumeCommand?: (volume: number, muted: boolean) => void;
+
+  /**
+   * Getter for external volume state.
+   * Called when reporting state to server if useHardwareVolume is true.
+   * Should return current hardware volume (0-100) and muted state.
+   */
+  getExternalVolume?: () => { volume: number; muted: boolean };
 }
 
 export interface AudioBufferQueueItem {
