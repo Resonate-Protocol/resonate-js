@@ -286,4 +286,12 @@ export class ResonateTimeFilter {
   get offset(): number {
     return this._offset;
   }
+
+  /**
+   * Get the current clock drift rate estimate.
+   * Returns the drift as a ratio (e.g., 0.04 means server clock is 4% faster).
+   */
+  get drift(): number {
+    return this._drift;
+  }
 }

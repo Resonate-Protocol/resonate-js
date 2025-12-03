@@ -37,6 +37,19 @@ export class AudioProcessor {
     this.lastScheduledServerTime = 0;
   }
 
+  // Get current sync info for debugging/display
+  get syncInfo(): {
+    clockDriftPercent: number;
+    syncErrorMs: number;
+    resyncCount: number;
+  } {
+    return {
+      clockDriftPercent: this.timeFilter.drift * 100,
+      syncErrorMs: this.currentSyncErrorMs,
+      resyncCount: this.resyncCount,
+    };
+  }
+
   // Initialize AudioContext with platform-specific setup
   initAudioContext(): void {
     if (this.audioContext) {

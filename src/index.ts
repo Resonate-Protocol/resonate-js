@@ -165,6 +165,15 @@ export class ResonatePlayer {
       error: Math.round(this.timeFilter.error / 1000), // ms
     };
   }
+
+  // Sync info for debugging/display
+  get syncInfo(): {
+    clockDriftPercent: number;
+    syncErrorMs: number;
+    resyncCount: number;
+  } {
+    return this.audioProcessor.syncInfo;
+  }
 }
 
 // Re-export types for convenience
