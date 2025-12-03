@@ -11,8 +11,12 @@ export class AudioProcessor {
   private queueProcessTimeout: number | null = null;
 
   // Seamless playback tracking
-  private nextPlaybackTime: number = 0;  // AudioContext time when next chunk should start
-  private lastScheduledServerTime: number = 0;  // Server timestamp of last scheduled chunk end
+  private nextPlaybackTime: number = 0; // AudioContext time when next chunk should start
+  private lastScheduledServerTime: number = 0; // Server timestamp of last scheduled chunk end
+
+  // Sync tracking (for debugging/display)
+  private currentSyncErrorMs: number = 0;
+  private resyncCount: number = 0;
 
   constructor(
     private stateManager: StateManager,
@@ -304,15 +308,18 @@ export class AudioProcessor {
 
       let playbackTime: number;
 
+      // Always compute the drift-corrected target time
+      const chunkClientTimeUs = this.timeFilter.computeClientTime(
+        chunk.serverTime,
+      );
+      const deltaUs = chunkClientTimeUs - nowUs;
+      const deltaSec = deltaUs / 1_000_000;
+      const targetPlaybackTime =
+        audioContextTime + deltaSec + bufferSec + syncDelaySec;
+
       // First chunk or after a gap: calculate from server timestamp
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
-        // Convert server timestamp to client time using synchronized clock
-        const chunkClientTimeUs = this.timeFilter.computeClientTime(
-          chunk.serverTime,
-        );
-        const deltaUs = chunkClientTimeUs - nowUs;
-        const deltaSec = deltaUs / 1_000_000;
-        playbackTime = audioContextTime + deltaSec + bufferSec + syncDelaySec;
+        playbackTime = targetPlaybackTime;
       } else {
         // Subsequent chunks: schedule back-to-back for seamless playback
         // Check if this chunk is contiguous with the last one
@@ -321,17 +328,32 @@ export class AudioProcessor {
         const serverGapSec = serverGapUs / 1_000_000;
 
         if (Math.abs(serverGapSec) < 0.1) {
-          // Chunk is contiguous (within 100ms) - schedule seamlessly
-          playbackTime = this.nextPlaybackTime;
+          // Chunk is contiguous (within 100ms)
+          // Calculate sync error for monitoring (positive = ahead, negative = behind)
+          const syncErrorSec = this.nextPlaybackTime - targetPlaybackTime;
+          const syncErrorMs = syncErrorSec * 1000;
+
+          // Store for display
+          this.currentSyncErrorMs = syncErrorMs;
+
+          // Hard resync if sync error exceeds threshold
+          if (Math.abs(syncErrorMs) > 20) {
+            console.log(
+              `Resonate: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`,
+            );
+            this.resyncCount++;
+            playbackTime = targetPlaybackTime;
+          } else {
+            // Use seamless scheduling
+            playbackTime = this.nextPlaybackTime;
+          }
         } else {
-          // Gap detected in server timestamps - resync from timestamp
-          console.log(`Resonate: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`);
-          const chunkClientTimeUs = this.timeFilter.computeClientTime(
-            chunk.serverTime,
+          // Gap detected in server timestamps - hard resync
+          console.log(
+            `Resonate: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`,
           );
-          const deltaUs = chunkClientTimeUs - nowUs;
-          const deltaSec = deltaUs / 1_000_000;
-          playbackTime = audioContextTime + deltaSec + bufferSec + syncDelaySec;
+          this.resyncCount++;
+          playbackTime = targetPlaybackTime;
         }
       }
 
@@ -410,6 +432,10 @@ export class AudioProcessor {
     // Reset seamless playback tracking
     this.nextPlaybackTime = 0;
     this.lastScheduledServerTime = 0;
+
+    // Reset sync stats
+    this.currentSyncErrorMs = 0;
+    this.resyncCount = 0;
   }
 
   // Cleanup and close AudioContext
