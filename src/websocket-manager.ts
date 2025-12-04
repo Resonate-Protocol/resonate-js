@@ -33,14 +33,14 @@ export class WebSocketManager {
 
     return new Promise((resolve, reject) => {
       try {
-        console.log("Resonate: Connecting to", url);
+        console.log("Sendspin: Connecting to", url);
 
         this.ws = new WebSocket(url);
         this.ws.binaryType = "arraybuffer";
         this.shouldReconnect = true;
 
         this.ws.onopen = () => {
-          console.log("Resonate: WebSocket connected");
+          console.log("Sendspin: WebSocket connected");
           if (this.onOpenHandler) {
             this.onOpenHandler();
           }
@@ -54,7 +54,7 @@ export class WebSocketManager {
         };
 
         this.ws.onerror = (error: Event) => {
-          console.error("Resonate: WebSocket error", error);
+          console.error("Sendspin: WebSocket error", error);
           if (this.onErrorHandler) {
             this.onErrorHandler(error);
           }
@@ -62,7 +62,7 @@ export class WebSocketManager {
         };
 
         this.ws.onclose = () => {
-          console.log("Resonate: WebSocket disconnected");
+          console.log("Sendspin: WebSocket disconnected");
           if (this.onCloseHandler) {
             this.onCloseHandler();
           }
@@ -73,7 +73,7 @@ export class WebSocketManager {
           }
         };
       } catch (error) {
-        console.error("Resonate: Failed to connect", error);
+        console.error("Sendspin: Failed to connect", error);
         reject(error);
       }
     });
@@ -87,7 +87,7 @@ export class WebSocketManager {
 
     this.reconnectTimeout = window.setTimeout(() => {
       if (this.shouldReconnect) {
-        console.log("Resonate: Attempting to reconnect...");
+        console.log("Sendspin: Attempting to reconnect...");
         this.connect(
           url,
           this.onOpenHandler,
@@ -95,7 +95,7 @@ export class WebSocketManager {
           this.onErrorHandler,
           this.onCloseHandler,
         ).catch((error) => {
-          console.error("Resonate: Reconnection failed", error);
+          console.error("Sendspin: Reconnection failed", error);
         });
       }
     }, 5000);
@@ -121,7 +121,7 @@ export class WebSocketManager {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
-      console.warn("Resonate: Cannot send message, WebSocket not connected");
+      console.warn("Sendspin: Cannot send message, WebSocket not connected");
     }
   }
 

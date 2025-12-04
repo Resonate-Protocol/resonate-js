@@ -24,7 +24,7 @@ export interface TimeElement {
   drift: number;
 }
 
-export class ResonateTimeFilter {
+export class SendspinTimeFilter {
   private _last_update: number = 0;
   private _count: number = 0;
 

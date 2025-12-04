@@ -1,4 +1,4 @@
-import type { ResonateTimeFilter } from "./time-filter";
+import type { SendspinTimeFilter } from "./time-filter";
 import type {
   ClientHello,
   ClientState,
@@ -41,10 +41,10 @@ export class ProtocolHandler {
     private wsManager: WebSocketManager,
     private audioProcessor: AudioProcessor,
     private stateManager: StateManager,
-    private timeFilter: ResonateTimeFilter,
+    private timeFilter: SendspinTimeFilter,
     config: ProtocolHandlerConfig = {},
   ) {
-    this.clientName = config.clientName ?? "Resonate Player";
+    this.clientName = config.clientName ?? "Sendspin Player";
     this.supportedFormats = config.supportedFormats;
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.useHardwareVolume = config.useHardwareVolume ?? false;
@@ -105,7 +105,7 @@ export class ProtocolHandler {
 
   // Handle server hello
   private handleServerHello(): void {
-    console.log("Resonate: Connected to server");
+    console.log("Sendspin: Connected to server");
     // Per spec: Send initial client/state immediately after server/hello
     this.sendStateUpdate();
     // Start time synchronization
@@ -143,7 +143,7 @@ export class ProtocolHandler {
     this.timeFilter.update(measurement, max_error, T4);
 
     console.log(
-      "Resonate: Clock sync - offset:",
+      "Sendspin: Clock sync - offset:",
       (this.timeFilter.offset / 1000).toFixed(2),
       "ms, error:",
       (this.timeFilter.error / 1000).toFixed(2),
@@ -158,7 +158,7 @@ export class ProtocolHandler {
 
     this.stateManager.currentStreamFormat = message.payload.player;
     console.log(
-      isFormatUpdate ? "Resonate: Stream format updated" : "Resonate: Stream started",
+      isFormatUpdate ? "Sendspin: Stream format updated" : "Sendspin: Stream started",
       this.stateManager.currentStreamFormat,
     );
 
@@ -189,7 +189,7 @@ export class ProtocolHandler {
     const roles = message.payload.roles;
     // If roles is undefined or includes 'player', clear player buffers
     if (!roles || roles.includes("player")) {
-      console.log("Resonate: Stream clear (seek)");
+      console.log("Sendspin: Stream clear (seek)");
       this.audioProcessor.clearBuffers();
       this.stateManager.resetStreamAnchors();
       // Note: Don't stop playing, don't clear format - just clear buffers
@@ -202,7 +202,7 @@ export class ProtocolHandler {
 
     // If roles is undefined or includes 'player', handle player stream end
     if (!roles || roles.includes("player")) {
-      console.log("Resonate: Stream ended");
+      console.log("Sendspin: Stream ended");
       // Per spec: Stop playback and clear buffers
       this.audioProcessor.clearBuffers();
 
@@ -266,7 +266,7 @@ export class ProtocolHandler {
         client_id: this.playerId,
         name: this.clientName,
         version: 1,
-        supported_roles: ["player"],
+        supported_roles: ["player@v1"],
         device_info: {
           product_name: "Web Browser",
           manufacturer: (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
