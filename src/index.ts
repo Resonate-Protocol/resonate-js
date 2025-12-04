@@ -65,7 +65,7 @@ export class ResonatePlayer {
     // Build WebSocket URL
     const url = new URL(this.config.baseUrl);
     const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-    this.wsUrl = `${wsProtocol}//${url.host}/resonate?player_id=${encodeURIComponent(this.config.playerId)}`;
+    this.wsUrl = `${wsProtocol}//${url.host}/sendspin`;
 
     // Connect to WebSocket
     await this.wsManager.connect(

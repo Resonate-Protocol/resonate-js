@@ -238,8 +238,8 @@ export class AudioProcessor {
     // Spec: bits 7-2 identify role type (6 bits), bits 1-0 identify message slot (2 bits)
     const firstByte = new Uint8Array(data)[0];
 
-    // Type 0 is audio chunk (Player role, slot 0)
-    if (firstByte === 0) {
+    // Type 4 is audio chunk (Player role, slot 0) - IDs 4-7 are player role
+    if (firstByte === 4) {
       // Next 8 bytes are server timestamp in microseconds (big-endian int64)
       const timestampView = new DataView(data, 1, 8);
       // Read as big-endian int64 and convert to number

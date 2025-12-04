@@ -266,7 +266,7 @@ export class ProtocolHandler {
         client_id: this.playerId,
         name: this.clientName,
         version: 1,
-        supported_roles: ["player"],
+        supported_roles: ["player@v1"],
         device_info: {
           product_name: "Web Browser",
           manufacturer: (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
