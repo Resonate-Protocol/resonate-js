@@ -1,8 +1,8 @@
 {
-  "name": "@music-assistant/resonate-js",
+  "name": "@music-assistant/sendspin-js",
   "version": "0.1.0",
   "type": "module",
-  "description": "TypeScript client library for the Resonate (working title) synchronized audio protocol",
+  "description": "TypeScript client library for the Sendspin synchronized audio protocol",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -26,14 +26,14 @@
     "music-assistant"
   ],
   "license": "Apache-2.0",
-  "author": "Resonate Protocol Authors <resonate@openhomefoundation.org>",
+  "author": "Sendspin Protocol Authors <sendspin@openhomefoundation.org>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Resonate-Protocol/resonate-js.git"
+    "url": "git+https://github.com/Sendspin-Protocol/sendspin-js.git"
   },
-  "homepage": "https://github.com/Resonate-Protocol/resonate-js#readme",
+  "homepage": "https://github.com/Sendspin-Protocol/sendspin-js#readme",
   "bugs": {
-    "url": "https://github.com/Resonate-Protocol/resonate-js/issues"
+    "url": "https://github.com/Sendspin-Protocol/sendspin-js/issues"
   },
   "engines": {
     "node": ">=16.0.0"

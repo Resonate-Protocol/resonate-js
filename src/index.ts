@@ -2,24 +2,24 @@ import { AudioProcessor } from "./audio-processor";
 import { ProtocolHandler } from "./protocol-handler";
 import { StateManager } from "./state-manager";
 import { WebSocketManager } from "./websocket-manager";
-import { ResonateTimeFilter } from "./time-filter";
-import type { ResonatePlayerConfig, PlayerState, StreamFormat } from "./types";
+import { SendspinTimeFilter } from "./time-filter";
+import type { SendspinPlayerConfig, PlayerState, StreamFormat } from "./types";
 
-export class ResonatePlayer {
+export class SendspinPlayer {
   private wsManager: WebSocketManager;
   private audioProcessor: AudioProcessor;
   private protocolHandler: ProtocolHandler;
   private stateManager: StateManager;
-  private timeFilter: ResonateTimeFilter;
+  private timeFilter: SendspinTimeFilter;
 
-  private config: ResonatePlayerConfig;
+  private config: SendspinPlayerConfig;
   private wsUrl: string = "";
 
-  constructor(config: ResonatePlayerConfig) {
+  constructor(config: SendspinPlayerConfig) {
     this.config = config;
 
     // Initialize time filter (shared between audio processor and protocol handler)
-    this.timeFilter = new ResonateTimeFilter();
+    this.timeFilter = new SendspinTimeFilter();
 
     // Initialize state manager with callback
     this.stateManager = new StateManager(config.onStateChange);
@@ -60,7 +60,7 @@ export class ResonatePlayer {
     );
   }
 
-  // Connect to Resonate server
+  // Connect to Sendspin server
   async connect(): Promise<void> {
     // Build WebSocket URL
     const url = new URL(this.config.baseUrl);
@@ -72,7 +72,7 @@ export class ResonatePlayer {
       this.wsUrl,
       // onOpen
       () => {
-        console.log("Resonate: Using player_id:", this.config.playerId);
+        console.log("Sendspin: Using player_id:", this.config.playerId);
         this.protocolHandler.sendClientHello();
       },
       // onMessage
@@ -81,16 +81,16 @@ export class ResonatePlayer {
       },
       // onError
       (error: Event) => {
-        console.error("Resonate: WebSocket error", error);
+        console.error("Sendspin: WebSocket error", error);
       },
       // onClose
       () => {
-        console.log("Resonate: Connection closed");
+        console.log("Sendspin: Connection closed");
       },
     );
   }
 
-  // Disconnect from Resonate server
+  // Disconnect from Sendspin server
   disconnect(): void {
     // Clear intervals
     this.stateManager.clearAllIntervals();
@@ -178,4 +178,4 @@ export class ResonatePlayer {
 
 // Re-export types for convenience
 export * from "./types";
-export { ResonateTimeFilter } from "./time-filter";
+export { SendspinTimeFilter } from "./time-filter";

@@ -1,4 +1,4 @@
-// Resonate Protocol Types and Interfaces
+// Sendspin Protocol Types and Interfaces
 
 export enum MessageType {
   CLIENT_HELLO = "client/hello",
@@ -151,11 +151,11 @@ export interface SupportedFormat {
   bit_depth: number;
 }
 
-export interface ResonatePlayerConfig {
+export interface SendspinPlayerConfig {
   /** Unique player identifier */
   playerId: string;
 
-  /** Base URL of the Resonate server (e.g., "http://192.168.1.100:8095") */
+  /** Base URL of the Sendspin server (e.g., "http://192.168.1.100:8095") */
   baseUrl: string;
 
   /** Human-readable name for this player */

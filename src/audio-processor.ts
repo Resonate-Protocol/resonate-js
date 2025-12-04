@@ -1,6 +1,6 @@
 import type { AudioBufferQueueItem, StreamFormat, AudioOutputMode } from "./types";
 import type { StateManager } from "./state-manager";
-import type { ResonateTimeFilter } from "./time-filter";
+import type { SendspinTimeFilter } from "./time-filter";
 
 export class AudioProcessor {
   private audioContext: AudioContext | null = null;
@@ -20,7 +20,7 @@ export class AudioProcessor {
 
   constructor(
     private stateManager: StateManager,
-    private timeFilter: ResonateTimeFilter,
+    private timeFilter: SendspinTimeFilter,
     private outputMode: AudioOutputMode = "direct",
     private audioElement?: HTMLAudioElement,
     private isAndroid: boolean = false,
@@ -81,7 +81,7 @@ export class AudioProcessor {
         this.audioElement.volume = 1.0;
         // Start playing to activate MediaSession
         this.audioElement.play().catch((e) => {
-          console.warn("Resonate: Audio autoplay blocked:", e);
+          console.warn("Sendspin: Audio autoplay blocked:", e);
         });
       } else {
         // iOS/Desktop: Use MediaStream approach for background playback
@@ -95,7 +95,7 @@ export class AudioProcessor {
         this.audioElement.volume = 1.0;
         // Start playing to activate MediaSession
         this.audioElement.play().catch((e) => {
-          console.warn("Resonate: Audio autoplay blocked:", e);
+          console.warn("Sendspin: Audio autoplay blocked:", e);
         });
       }
     }
@@ -107,7 +107,7 @@ export class AudioProcessor {
   async resumeAudioContext(): Promise<void> {
     if (this.audioContext && this.audioContext.state === "suspended") {
       await this.audioContext.resume();
-      console.log("Resonate: AudioContext resumed");
+      console.log("Sendspin: AudioContext resumed");
     }
   }
 
@@ -219,15 +219,15 @@ export class AudioProcessor {
   async handleBinaryMessage(data: ArrayBuffer): Promise<void> {
     const format = this.stateManager.currentStreamFormat;
     if (!format) {
-      console.warn("Resonate: Received audio chunk but no stream format set");
+      console.warn("Sendspin: Received audio chunk but no stream format set");
       return;
     }
     if (!this.audioContext) {
-      console.warn("Resonate: Received audio chunk but no audio context");
+      console.warn("Sendspin: Received audio chunk but no audio context");
       return;
     }
     if (!this.gainNode) {
-      console.warn("Resonate: Received audio chunk but no gain node");
+      console.warn("Sendspin: Received audio chunk but no gain node");
       return;
     }
 
@@ -253,7 +253,7 @@ export class AudioProcessor {
         // Check if stream generation changed during async decode
         if (generation !== this.stateManager.streamGeneration) {
           console.log(
-            "Resonate: Discarding audio chunk from old stream (generation mismatch)",
+            "Sendspin: Discarding audio chunk from old stream (generation mismatch)",
           );
           return;
         }
@@ -275,7 +275,7 @@ export class AudioProcessor {
           this.queueProcessTimeout = null;
         }, 50); // 50ms debounce - collect a larger batch before scheduling
       } else {
-        console.error("Resonate: Failed to decode audio buffer");
+        console.error("Sendspin: Failed to decode audio buffer");
       }
     }
   }
@@ -289,7 +289,7 @@ export class AudioProcessor {
     this.audioBufferQueue = this.audioBufferQueue.filter((chunk) => {
       if (chunk.generation !== currentGeneration) {
         console.log(
-          "Resonate: Filtering out audio chunk from old stream during queue processing",
+          "Sendspin: Filtering out audio chunk from old stream during queue processing",
         );
         return false;
       }
@@ -301,7 +301,7 @@ export class AudioProcessor {
 
     // Don't schedule until time sync is ready
     if (!this.timeFilter.is_synchronized) {
-      console.log("Resonate: Waiting for time sync before scheduling audio");
+      console.log("Sendspin: Waiting for time sync before scheduling audio");
       return;
     }
 
@@ -372,7 +372,7 @@ export class AudioProcessor {
 
       // Drop chunks that arrived too late
       if (playbackTime < audioContextTime) {
-        console.log("Resonate: Dropping late audio chunk");
+        console.log("Sendspin: Dropping late audio chunk");
         // Reset seamless tracking since we dropped a chunk
         this.nextPlaybackTime = 0;
         this.lastScheduledServerTime = 0;
@@ -401,7 +401,7 @@ export class AudioProcessor {
     if (this.outputMode === "media-element" && this.audioElement) {
       if (this.audioElement.paused) {
         this.audioElement.play().catch((e) => {
-          console.warn("Resonate: Failed to start audio element:", e);
+          console.warn("Sendspin: Failed to start audio element:", e);
         });
       }
     }
