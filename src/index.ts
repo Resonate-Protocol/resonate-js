@@ -73,7 +73,7 @@ export class SendspinPlayer {
       this.wsUrl,
       // onOpen
       () => {
-        console.log("Experimental Sendspin: Using player_id:", this.config.playerId);
+        console.log("Sendspin: Using player_id:", this.config.playerId);
         this.protocolHandler.sendClientHello();
       },
       // onMessage

@@ -146,7 +146,7 @@ export class ProtocolHandler {
     this.timeFilter.update(measurement, max_error, T4);
 
     console.log(
-      "Sendspin: Clock sink - offset:",
+      "Sendspin: Clock sync - offset:",
       (this.timeFilter.offset / 1000).toFixed(2),
       "ms, error:",
       (this.timeFilter.error / 1000).toFixed(2),
