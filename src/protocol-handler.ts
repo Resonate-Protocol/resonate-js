@@ -26,6 +26,7 @@ export interface ProtocolHandlerConfig {
   useHardwareVolume?: boolean;
   onVolumeCommand?: (volume: number, muted: boolean) => void;
   getExternalVolume?: () => { volume: number; muted: boolean };
+  useOutputLatencyCompensation?: boolean;
 }
 
 export class ProtocolHandler {
@@ -33,6 +34,7 @@ export class ProtocolHandler {
   private supportedFormats?: SupportedFormat[];
   private bufferCapacity: number;
   private useHardwareVolume: boolean;
+  private useOutputLatencyCompensation: boolean;
   private onVolumeCommand?: (volume: number, muted: boolean) => void;
   private getExternalVolume?: () => { volume: number; muted: boolean };
 
@@ -42,12 +44,14 @@ export class ProtocolHandler {
     private audioProcessor: AudioProcessor,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
-    config: ProtocolHandlerConfig = {},
+    config: ProtocolHandlerConfig = {}
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.supportedFormats = config.supportedFormats;
     this.bufferCapacity = config.bufferCapacity ?? 1024 * 1024 * 5; // 5MB default
     this.useHardwareVolume = config.useHardwareVolume ?? false;
+    this.useOutputLatencyCompensation =
+      config.useOutputLatencyCompensation ?? false;
     this.onVolumeCommand = config.onVolumeCommand;
     this.getExternalVolume = config.getExternalVolume;
   }
@@ -112,14 +116,14 @@ export class ProtocolHandler {
     this.sendTimeSync();
     const timeSyncInterval = window.setInterval(
       () => this.sendTimeSync(),
-      TIME_SYNC_INTERVAL,
+      TIME_SYNC_INTERVAL
     );
     this.stateManager.setTimeSyncInterval(timeSyncInterval);
 
     // Start periodic state updates
     const stateInterval = window.setInterval(
       () => this.sendStateUpdate(),
-      STATE_UPDATE_INTERVAL,
+      STATE_UPDATE_INTERVAL
     );
     this.stateManager.setStateUpdateInterval(stateInterval);
   }
@@ -134,7 +138,14 @@ export class ProtocolHandler {
     const T3 = message.payload.server_transmitted;
 
     // NTP offset calculation: measurement = ((T2 - T1) + (T3 - T4)) / 2
-    const measurement = (T2 - T1 + (T3 - T4)) / 2;
+    const clockOffset = (T2 - T1 + (T3 - T4)) / 2;
+
+    // Optionally add output latency to offset measurement so Kalman filter smooths it together
+    // This compensates for hardware delay (e.g., Bluetooth) by scheduling audio earlier
+    const outputLatencyUs = this.useOutputLatencyCompensation
+      ? this.audioProcessor.getRawOutputLatencyUs()
+      : 0;
+    const measurement = clockOffset + outputLatencyUs;
 
     // Max error (half of round-trip time): max_error = ((T4 - T1) - (T3 - T2)) / 2
     const max_error = (T4 - T1 - (T3 - T2)) / 2;
@@ -145,10 +156,12 @@ export class ProtocolHandler {
     console.log(
       "Sendspin: Clock sync - offset:",
       (this.timeFilter.offset / 1000).toFixed(2),
+      "ms, outputLatency:",
+      (outputLatencyUs / 1000).toFixed(2),
       "ms, error:",
       (this.timeFilter.error / 1000).toFixed(2),
       "ms, synced:",
-      this.timeFilter.is_synchronized,
+      this.timeFilter.is_synchronized
     );
   }
 
@@ -158,8 +171,10 @@ export class ProtocolHandler {
 
     this.stateManager.currentStreamFormat = message.payload.player;
     console.log(
-      isFormatUpdate ? "Sendspin: Stream format updated" : "Sendspin: Stream started",
-      this.stateManager.currentStreamFormat,
+      isFormatUpdate
+        ? "Sendspin: Stream format updated"
+        : "Sendspin: Stream started",
+      this.stateManager.currentStreamFormat
     );
 
     this.audioProcessor.initAudioContext();
@@ -269,11 +284,15 @@ export class ProtocolHandler {
         supported_roles: ["player@v1"],
         device_info: {
           product_name: "Web Browser",
-          manufacturer: (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
-          software_version: (typeof navigator !== "undefined" && navigator.userAgent) || "Unknown",
+          manufacturer:
+            (typeof navigator !== "undefined" && navigator.vendor) || "Unknown",
+          software_version:
+            (typeof navigator !== "undefined" && navigator.userAgent) ||
+            "Unknown",
         },
         player_support: {
-          supported_formats: this.supportedFormats ?? this.getDefaultSupportedFormats(),
+          supported_formats:
+            this.supportedFormats ?? this.getDefaultSupportedFormats(),
           buffer_capacity: this.bufferCapacity,
           supported_commands: ["volume", "mute"],
         },
@@ -291,7 +310,8 @@ export class ProtocolHandler {
   }> {
     // Safari has limited codec support, only use PCM for Safari
     // TODO: add flac support for Safari
-    const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const userAgent =
+      typeof navigator !== "undefined" ? navigator.userAgent : "";
     const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
 
     if (isSafari) {
