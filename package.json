@@ -29,11 +29,11 @@
   "author": "Sendspin Protocol Authors <sendspin@openhomefoundation.org>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Sendspin-Protocol/sendspin-js.git"
+    "url": "git+https://github.com/Sendspin/sendspin-js.git"
   },
-  "homepage": "https://github.com/Sendspin-Protocol/sendspin-js#readme",
+  "homepage": "https://github.com/Sendspin/sendspin-js#readme",
   "bugs": {
-    "url": "https://github.com/Sendspin-Protocol/sendspin-js/issues"
+    "url": "https://github.com/Sendspin/sendspin-js/issues"
   },
   "engines": {
     "node": ">=16.0.0"
