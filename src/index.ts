@@ -56,6 +56,7 @@ export class SendspinPlayer {
         useHardwareVolume: config.useHardwareVolume,
         onVolumeCommand: config.onVolumeCommand,
         getExternalVolume: config.getExternalVolume,
+        useOutputLatencyCompensation: config.useOutputLatencyCompensation,
       },
     );
   }
@@ -171,6 +172,7 @@ export class SendspinPlayer {
     clockDriftPercent: number;
     syncErrorMs: number;
     resyncCount: number;
+    outputLatencyMs: number;
   } {
     return this.audioProcessor.syncInfo;
   }

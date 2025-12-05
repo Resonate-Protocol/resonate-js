@@ -11,7 +11,7 @@
  * matrix to track estimation uncertainty. An adaptive forgetting factor helps the
  * filter recover quickly from network disruptions or server clock adjustments.
  *
- * Direct port of the Python implementation from aioresonate.
+ * Direct port of the Python implementation from aiosendspin.
  */
 
 // Residual threshold as fraction of max_error for triggering adaptive forgetting.
@@ -205,7 +205,7 @@ export class SendspinTimeFilter {
 
     const dt = client_time - this._current_time_element.last_update;
     const offset = Math.round(
-      this._current_time_element.offset + this._current_time_element.drift * dt,
+      this._current_time_element.offset + this._current_time_element.drift * dt
     );
     return client_time + offset;
   }
@@ -231,7 +231,7 @@ export class SendspinTimeFilter {
         this._current_time_element.offset +
         this._current_time_element.drift *
           this._current_time_element.last_update) /
-        (1.0 + this._current_time_element.drift),
+        (1.0 + this._current_time_element.drift)
     );
   }
 

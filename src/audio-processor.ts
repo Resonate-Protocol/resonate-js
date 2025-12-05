@@ -1,4 +1,8 @@
-import type { AudioBufferQueueItem, StreamFormat, AudioOutputMode } from "./types";
+import type {
+  AudioBufferQueueItem,
+  StreamFormat,
+  AudioOutputMode,
+} from "./types";
 import type { StateManager } from "./state-manager";
 import type { SendspinTimeFilter } from "./time-filter";
 
@@ -26,7 +30,7 @@ export class AudioProcessor {
     private isAndroid: boolean = false,
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
-    private useHardwareVolume: boolean = false,
+    private useHardwareVolume: boolean = false
   ) {}
 
   // Update sync delay at runtime
@@ -42,12 +46,22 @@ export class AudioProcessor {
     clockDriftPercent: number;
     syncErrorMs: number;
     resyncCount: number;
+    outputLatencyMs: number;
   } {
     return {
       clockDriftPercent: this.timeFilter.drift * 100,
       syncErrorMs: this.currentSyncErrorMs,
       resyncCount: this.resyncCount,
+      outputLatencyMs: this.getRawOutputLatencyUs() / 1000,
     };
+  }
+
+  // Get raw output latency in microseconds (for Kalman filter input)
+  getRawOutputLatencyUs(): number {
+    if (!this.audioContext) return 0;
+    const baseLatency = this.audioContext.baseLatency ?? 0;
+    const outputLatency = this.audioContext.outputLatency ?? 0;
+    return (baseLatency + outputLatency) * 1_000_000; // Convert seconds to microseconds
   }
 
   // Initialize AudioContext with platform-specific setup
@@ -86,7 +100,8 @@ export class AudioProcessor {
       } else {
         // iOS/Desktop: Use MediaStream approach for background playback
         // Create MediaStreamDestination to bridge Web Audio API to HTML5 audio element
-        this.streamDestination = this.audioContext.createMediaStreamDestination();
+        this.streamDestination =
+          this.audioContext.createMediaStreamDestination();
         this.gainNode.connect(this.streamDestination);
         // Do NOT connect to audioContext.destination to avoid echo
 
@@ -131,7 +146,7 @@ export class AudioProcessor {
   // Decode audio data based on codec
   async decodeAudioData(
     audioData: ArrayBuffer,
-    format: StreamFormat,
+    format: StreamFormat
   ): Promise<AudioBuffer | null> {
     if (!this.audioContext) return null;
 
@@ -143,11 +158,11 @@ export class AudioProcessor {
         if (format.codec_header) {
           // Decode Base64 codec header
           const headerBytes = Uint8Array.from(atob(format.codec_header), (c) =>
-            c.charCodeAt(0),
+            c.charCodeAt(0)
           );
           // Concatenate header + audio data
           const combined = new Uint8Array(
-            headerBytes.length + audioData.byteLength,
+            headerBytes.length + audioData.byteLength
           );
           combined.set(headerBytes, 0);
           combined.set(new Uint8Array(audioData), headerBytes.length);
@@ -168,7 +183,7 @@ export class AudioProcessor {
   // Decode PCM audio data
   private decodePCMData(
     audioData: ArrayBuffer,
-    format: StreamFormat,
+    format: StreamFormat
   ): AudioBuffer | null {
     if (!this.audioContext) return null;
 
@@ -180,7 +195,7 @@ export class AudioProcessor {
     const audioBuffer = this.audioContext.createBuffer(
       format.channels,
       numSamples,
-      format.sample_rate,
+      format.sample_rate
     );
 
     // Decode PCM data (interleaved format)
@@ -253,7 +268,7 @@ export class AudioProcessor {
         // Check if stream generation changed during async decode
         if (generation !== this.stateManager.streamGeneration) {
           console.log(
-            "Sendspin: Discarding audio chunk from old stream (generation mismatch)",
+            "Sendspin: Discarding audio chunk from old stream (generation mismatch)"
           );
           return;
         }
@@ -289,7 +304,7 @@ export class AudioProcessor {
     this.audioBufferQueue = this.audioBufferQueue.filter((chunk) => {
       if (chunk.generation !== currentGeneration) {
         console.log(
-          "Sendspin: Filtering out audio chunk from old stream during queue processing",
+          "Sendspin: Filtering out audio chunk from old stream during queue processing"
         );
         return false;
       }
@@ -323,7 +338,7 @@ export class AudioProcessor {
 
       // Always compute the drift-corrected target time
       const chunkClientTimeUs = this.timeFilter.computeClientTime(
-        chunk.serverTime,
+        chunk.serverTime
       );
       const deltaUs = chunkClientTimeUs - nowUs;
       const deltaSec = deltaUs / 1_000_000;
@@ -352,7 +367,7 @@ export class AudioProcessor {
           // Hard resync if sync error exceeds threshold
           if (Math.abs(syncErrorMs) > 20) {
             console.log(
-              `Resonate: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`,
+              `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`
             );
             this.resyncCount++;
             playbackTime = targetPlaybackTime;
@@ -363,7 +378,7 @@ export class AudioProcessor {
         } else {
           // Gap detected in server timestamps - hard resync
           console.log(
-            `Resonate: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`,
+            `Sendspin: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`
           );
           this.resyncCount++;
           playbackTime = targetPlaybackTime;
@@ -386,7 +401,8 @@ export class AudioProcessor {
 
       // Track for seamless scheduling of next chunk
       this.nextPlaybackTime = playbackTime + chunkDuration;
-      this.lastScheduledServerTime = chunk.serverTime + chunkDuration * 1_000_000;
+      this.lastScheduledServerTime =
+        chunk.serverTime + chunkDuration * 1_000_000;
 
       this.scheduledSources.push(source);
       source.onended = () => {
@@ -410,7 +426,11 @@ export class AudioProcessor {
 
   // Stop audio element playback (for MediaSession)
   stopAudioElement(): void {
-    if (this.outputMode === "media-element" && this.audioElement && !this.isAndroid) {
+    if (
+      this.outputMode === "media-element" &&
+      this.audioElement &&
+      !this.isAndroid
+    ) {
       if (!this.audioElement.paused) {
         this.audioElement.pause();
       }
@@ -464,7 +484,11 @@ export class AudioProcessor {
     this.streamDestination = null;
 
     // Stop and clear the audio element (only for non-Android media-element mode)
-    if (this.outputMode === "media-element" && this.audioElement && !this.isAndroid) {
+    if (
+      this.outputMode === "media-element" &&
+      this.audioElement &&
+      !this.isAndroid
+    ) {
       this.audioElement.pause();
       this.audioElement.srcObject = null;
     }
