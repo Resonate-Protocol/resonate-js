@@ -2,6 +2,11 @@
 # yarn lockfile v1
 
 
+opus-encdec@^0.1.1:
+  version "0.1.1"
+  resolved "https://registry.yarnpkg.com/opus-encdec/-/opus-encdec-0.1.1.tgz#8b6f9ccbb2e97bc0ae0dac2966111937b6aedcf9"
+  integrity sha512-TDzyGqYqrwn5UEUNaLsfLGu8Ma+HRNrgLYj7Vx5wfTnafAA21G6Bnm/qTIa3orQi/yZPZYmkdpO/gez4nfA1Rw==
+
 typescript@^5.9.3:
   version "5.9.3"
   resolved "https://registry.yarnpkg.com/typescript/-/typescript-5.9.3.tgz#5b4f59e15310ab17a216f5d6cf53ee476ede670f"
