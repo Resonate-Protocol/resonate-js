@@ -56,6 +56,7 @@ export class SendspinPlayer {
         useHardwareVolume: config.useHardwareVolume,
         onVolumeCommand: config.onVolumeCommand,
         getExternalVolume: config.getExternalVolume,
+        timeSyncInterval: config.timeSyncInterval,
       },
     );
   }

@@ -34,6 +34,8 @@ export const Timing = {
   CHUNK_STAGGER: 10,
   TIME_SYNC_POLL: 100,
   TIME_SYNC_TIMEOUT: 15000,
+  // Fast time sync interval for tests (default is 5000ms)
+  TIME_SYNC_INTERVAL: 50,
 } as const;
 
 // ============================================================================
@@ -139,12 +141,15 @@ export function createPlayer(options: Partial<{
   baseUrl: string;
   clientName: string;
   syncDelay: number;
+  timeSyncInterval: number;
 }> = {}): SendspinPlayer {
   return new SendspinPlayer({
     playerId: options.playerId ?? "test-player-1",
     baseUrl: options.baseUrl ?? "http://localhost:8095",
     clientName: options.clientName,
     syncDelay: options.syncDelay,
+    // Use fast time sync interval for tests (50ms instead of 5000ms)
+    timeSyncInterval: options.timeSyncInterval ?? Timing.TIME_SYNC_INTERVAL,
   });
 }
 
