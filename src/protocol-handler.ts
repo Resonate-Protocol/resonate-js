@@ -177,7 +177,7 @@ export class ProtocolHandler {
       this.stateManager.currentStreamFormat
     );
     console.log(
-      `🎵 Sendspin: Codec=${this.stateManager.currentStreamFormat.codec.toUpperCase()}, ` +
+      `Sendspin: Codec=${this.stateManager.currentStreamFormat.codec.toUpperCase()}, ` +
       `SampleRate=${this.stateManager.currentStreamFormat.sample_rate}Hz, ` +
       `Channels=${this.stateManager.currentStreamFormat.channels}, ` +
       `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`
