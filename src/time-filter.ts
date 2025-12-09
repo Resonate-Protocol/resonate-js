@@ -205,7 +205,7 @@ export class SendspinTimeFilter {
 
     const dt = client_time - this._current_time_element.last_update;
     const offset = Math.round(
-      this._current_time_element.offset + this._current_time_element.drift * dt
+      this._current_time_element.offset + this._current_time_element.drift * dt,
     );
     return client_time + offset;
   }
@@ -231,7 +231,7 @@ export class SendspinTimeFilter {
         this._current_time_element.offset +
         this._current_time_element.drift *
           this._current_time_element.last_update) /
-        (1.0 + this._current_time_element.drift)
+        (1.0 + this._current_time_element.drift),
     );
   }
 

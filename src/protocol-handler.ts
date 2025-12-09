@@ -44,7 +44,7 @@ export class ProtocolHandler {
     private audioProcessor: AudioProcessor,
     private stateManager: StateManager,
     private timeFilter: SendspinTimeFilter,
-    config: ProtocolHandlerConfig = {}
+    config: ProtocolHandlerConfig = {},
   ) {
     this.clientName = config.clientName ?? "Sendspin Player";
     this.supportedFormats = config.supportedFormats;
@@ -116,14 +116,14 @@ export class ProtocolHandler {
     this.sendTimeSync();
     const timeSyncInterval = window.setInterval(
       () => this.sendTimeSync(),
-      TIME_SYNC_INTERVAL
+      TIME_SYNC_INTERVAL,
     );
     this.stateManager.setTimeSyncInterval(timeSyncInterval);
 
     // Start periodic state updates
     const stateInterval = window.setInterval(
       () => this.sendStateUpdate(),
-      STATE_UPDATE_INTERVAL
+      STATE_UPDATE_INTERVAL,
     );
     this.stateManager.setStateUpdateInterval(stateInterval);
   }
@@ -161,7 +161,7 @@ export class ProtocolHandler {
       "ms, error:",
       (this.timeFilter.error / 1000).toFixed(2),
       "ms, synced:",
-      this.timeFilter.is_synchronized
+      this.timeFilter.is_synchronized,
     );
   }
 
@@ -174,13 +174,13 @@ export class ProtocolHandler {
       isFormatUpdate
         ? "Sendspin: Stream format updated"
         : "Sendspin: Stream started",
-      this.stateManager.currentStreamFormat
+      this.stateManager.currentStreamFormat,
     );
     console.log(
       `Sendspin: Codec=${this.stateManager.currentStreamFormat.codec.toUpperCase()}, ` +
-      `SampleRate=${this.stateManager.currentStreamFormat.sample_rate}Hz, ` +
-      `Channels=${this.stateManager.currentStreamFormat.channels}, ` +
-      `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`
+        `SampleRate=${this.stateManager.currentStreamFormat.sample_rate}Hz, ` +
+        `Channels=${this.stateManager.currentStreamFormat.channels}, ` +
+        `BitDepth=${this.stateManager.currentStreamFormat.bit_depth}bit`,
     );
 
     this.audioProcessor.initAudioContext();

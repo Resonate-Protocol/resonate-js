@@ -25,7 +25,9 @@ export class SendspinPlayer {
     this.stateManager = new StateManager(config.onStateChange);
 
     // Determine output mode (default to media-element if audioElement provided, otherwise direct)
-    const outputMode = config.audioOutputMode ?? (config.audioElement ? "media-element" : "direct");
+    const outputMode =
+      config.audioOutputMode ??
+      (config.audioElement ? "media-element" : "direct");
 
     // Initialize audio processor
     this.audioProcessor = new AudioProcessor(
