@@ -35,7 +35,7 @@ export class AudioProcessor {
     private isAndroid: boolean = false,
     private silentAudioSrc?: string,
     private syncDelayMs: number = 0,
-    private useHardwareVolume: boolean = false
+    private useHardwareVolume: boolean = false,
   ) {}
 
   // Update sync delay at runtime
@@ -151,7 +151,7 @@ export class AudioProcessor {
   // Decode audio data based on codec
   async decodeAudioData(
     audioData: ArrayBuffer,
-    format: StreamFormat
+    format: StreamFormat,
   ): Promise<AudioBuffer | null> {
     if (!this.audioContext) return null;
 
@@ -167,11 +167,11 @@ export class AudioProcessor {
         if (format.codec_header) {
           // Decode Base64 codec header
           const headerBytes = Uint8Array.from(atob(format.codec_header), (c) =>
-            c.charCodeAt(0)
+            c.charCodeAt(0),
           );
           // Concatenate header + audio data
           const combined = new Uint8Array(
-            headerBytes.length + audioData.byteLength
+            headerBytes.length + audioData.byteLength,
           );
           combined.set(headerBytes, 0);
           combined.set(new Uint8Array(audioData), headerBytes.length);
@@ -206,11 +206,14 @@ export class AudioProcessor {
       ]);
 
       // The UMD module exports the Module object directly (as default in ES6 modules)
-      this.opusDecoderModule = DecoderModuleExport.default || DecoderModuleExport;
+      this.opusDecoderModule =
+        DecoderModuleExport.default || DecoderModuleExport;
 
       // The OggOpusDecoder is exported as default.OggOpusDecoder
-      const decoderWrapper = (DecoderWrapperExport as any).default || DecoderWrapperExport;
-      const OggOpusDecoderClass = decoderWrapper.OggOpusDecoder || decoderWrapper;
+      const decoderWrapper =
+        (DecoderWrapperExport as any).default || DecoderWrapperExport;
+      const OggOpusDecoderClass =
+        decoderWrapper.OggOpusDecoder || decoderWrapper;
 
       // Wait for Module to be ready (async asm.js initialization)
       if (!this.opusDecoderModule.isReady) {
@@ -298,7 +301,7 @@ export class AudioProcessor {
   // Decode PCM audio data
   private decodePCMData(
     audioData: ArrayBuffer,
-    format: StreamFormat
+    format: StreamFormat,
   ): AudioBuffer | null {
     if (!this.audioContext) return null;
 
@@ -310,7 +313,7 @@ export class AudioProcessor {
     const audioBuffer = this.audioContext.createBuffer(
       format.channels,
       numSamples,
-      format.sample_rate
+      format.sample_rate,
     );
 
     // Decode PCM data (interleaved format)
@@ -383,7 +386,7 @@ export class AudioProcessor {
         // Check if stream generation changed during async decode
         if (generation !== this.stateManager.streamGeneration) {
           console.log(
-            "Sendspin: Discarding audio chunk from old stream (generation mismatch)"
+            "Sendspin: Discarding audio chunk from old stream (generation mismatch)",
           );
           return;
         }
@@ -419,7 +422,7 @@ export class AudioProcessor {
     this.audioBufferQueue = this.audioBufferQueue.filter((chunk) => {
       if (chunk.generation !== currentGeneration) {
         console.log(
-          "Sendspin: Filtering out audio chunk from old stream during queue processing"
+          "Sendspin: Filtering out audio chunk from old stream during queue processing",
         );
         return false;
       }
@@ -453,7 +456,7 @@ export class AudioProcessor {
 
       // Always compute the drift-corrected target time
       const chunkClientTimeUs = this.timeFilter.computeClientTime(
-        chunk.serverTime
+        chunk.serverTime,
       );
       const deltaUs = chunkClientTimeUs - nowUs;
       const deltaSec = deltaUs / 1_000_000;
@@ -482,7 +485,7 @@ export class AudioProcessor {
           // Hard resync if sync error exceeds threshold
           if (Math.abs(syncErrorMs) > 20) {
             console.log(
-              `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`
+              `Sendspin: Sync error ${syncErrorMs.toFixed(1)}ms, resyncing`,
             );
             this.resyncCount++;
             playbackTime = targetPlaybackTime;
@@ -493,7 +496,7 @@ export class AudioProcessor {
         } else {
           // Gap detected in server timestamps - hard resync
           console.log(
-            `Sendspin: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`
+            `Sendspin: Gap detected (${serverGapSec.toFixed(3)}s), resyncing`,
           );
           this.resyncCount++;
           playbackTime = targetPlaybackTime;
@@ -516,7 +519,8 @@ export class AudioProcessor {
 
       // Track for seamless scheduling of next chunk
       this.nextPlaybackTime = playbackTime + chunkDuration;
-      this.lastScheduledServerTime = chunk.serverTime + chunkDuration * 1_000_000;
+      this.lastScheduledServerTime =
+        chunk.serverTime + chunkDuration * 1_000_000;
 
       this.scheduledSources.push(source);
       source.onended = () => {

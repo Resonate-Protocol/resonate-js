@@ -18,6 +18,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "lint": "eslint . --fix --ignore-path .gitignore",
+    "prepare": "husky",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -39,6 +41,13 @@
     "node": ">=16.0.0"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "7.0.0",
+    "@typescript-eslint/parser": "6.21.0",
+    "eslint": "8.57.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-prettier": "5.5.4",
+    "husky": "^9.1.7",
+    "prettier": "3.7.4",
     "typescript": "^5.9.3"
   },
   "dependencies": {
