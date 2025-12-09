@@ -353,6 +353,13 @@ export class ProtocolHandler {
       }
     }
 
+    if (formats.length === 0) {
+      throw new Error(
+        `No supported codecs: requested [${this.codecs.join(", ")}], ` +
+          `browser supports [${[...browserSupported].join(", ")}]`,
+      );
+    }
+
     return formats;
   }
 
