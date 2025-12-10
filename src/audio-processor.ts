@@ -467,7 +467,7 @@ export class AudioProcessor {
       const audioBuffer = this.audioContext.createBuffer(
         format.channels,
         numFrames,
-        this.audioContext.sampleRate,
+        format.sample_rate,
       );
 
       // De-interleave samples into separate channels

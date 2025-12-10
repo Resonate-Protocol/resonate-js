@@ -359,7 +359,7 @@ export class ProtocolHandler {
     }
 
     if (hasNativeOpus) {
-      // Native Opus available (Chrome, Edge, Firefox desktop, Safari)
+      // Native Opus available (Chrome, Edge, Firefox desktop)
       return new Set(["pcm", "opus", "flac"] as Codec[]);
     }
 
