@@ -7,7 +7,12 @@ import {
 } from "../../src/core/noise/base64url";
 import { pskId } from "../../src/core/noise/constants";
 import type { PskCategory } from "../../src/core/noise/psk";
-import type { SendspinStorage } from "../../src/types";
+import type {
+  ActivatePairing,
+  PairOutChannel,
+  PairSecretLocation,
+  SendspinStorage,
+} from "../../src/types";
 import { CPace } from "../../src/core/pake/cpace";
 import { commitNonce, derivePin } from "../../src/core/pake/pin";
 import { SUITES } from "../../src/core/noise/suites";
@@ -68,11 +73,16 @@ function memStorage(): SendspinStorage & { data: Map<string, string> } {
   };
 }
 
+type OnPin = (pin: string | null, languages?: string[]) => void;
+
 interface SetupOpts {
   category?: PskCategory;
   storage?: SendspinStorage | null;
-  onPin?: ((pin: string | null) => void) | null;
+  onPin?: OnPin | null;
+  pinOutChannels?: PairOutChannel[];
   staticPin?: string;
+  staticPinLocations?: PairSecretLocation[];
+  pairingPskLocations?: PairSecretLocation[];
   minPinLength?: number;
 }
 
@@ -92,9 +102,12 @@ function setup(opts: SetupOpts = {}) {
     handshakeHash: () => HANDSHAKE_HASH,
     aeadSeal,
     storage: opts.storage ?? null,
-    onPin: onPin as ((pin: string | null) => void) | null,
+    onPin: onPin as OnPin | null,
+    pinOutChannels: opts.pinOutChannels,
     minPinLength: opts.minPinLength,
     staticPin: opts.staticPin,
+    staticPinLocations: opts.staticPinLocations,
+    pairingPskLocations: opts.pairingPskLocations,
     onEvent: (e, d) => {
       events.push(e);
       details.push(d);
@@ -108,6 +121,11 @@ function lastOfType(
   type: string,
 ) {
   return sent.filter((m) => m.type === type).at(-1);
+}
+
+/** A dynamic-PIN pairing activation, which now carries the PIN length. */
+function dynamic(pinLength = 6, languages?: string[]): ActivatePairing {
+  return { method: "dynamic_pin", pin_length: pinLength, languages };
 }
 
 /** Drive the server (initiator) side of a PIN PAKE against the manager. */
@@ -124,7 +142,7 @@ function serverPake(pin: string, index = 1) {
 describe("PairingManager (pairing_psk)", () => {
   it("finalizes a pairing_psk flow and persists a bound record", () => {
     const { store, sent, mgr } = setup();
-    expect(mgr.onActivate(["pairing"], "pairing_psk")).toBe(true);
+    expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
     const fin = sent[0] as { type: string; payload: { long_term_psk: string } };
     expect(fin.type).toBe("client/pair-finalize");
     expect(fin.payload.long_term_psk).toHaveLength(43);
@@ -136,27 +154,34 @@ describe("PairingManager (pairing_psk)", () => {
 
   it("aborts an unsupported method and keeps the connection open", () => {
     const { sent, close, mgr } = setup();
-    mgr.onActivate(["pairing"], "static_pin"); // not configured
+    mgr.onActivate(["pairing"], { method: "static_pin" }); // not configured
     expect(sent[0]!.type).toBe("pair/abort");
+    expect(sent[0]!.payload!.reason).toBe("method_not_supported");
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("aborts a pairing activation with no pairing object", () => {
+    const { sent, close, mgr } = setup();
+    mgr.onActivate(["pairing"]);
     expect(sent[0]!.payload!.reason).toBe("method_not_supported");
     expect(close).not.toHaveBeenCalled();
   });
 
   it("rejects a PIN method when the matched PSK is the Pairing PSK", () => {
     const { sent, mgr } = setup({ category: "pairing", onPin: vi.fn() });
-    mgr.onActivate(["pairing"], "dynamic_pin");
+    mgr.onActivate(["pairing"], dynamic());
     expect(sent[0]!.payload!.reason).toBe("method_not_supported");
   });
 
   it("rejects pairing_psk when the matched PSK is not the Pairing PSK", () => {
     const { sent, mgr } = setup({ category: "sentinel" });
-    mgr.onActivate(["pairing"], "pairing_psk");
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
     expect(sent[0]!.payload!.reason).toBe("method_not_supported");
   });
 
   it("clears the attempt on an inbound pair/abort but keeps the connection open", () => {
     const { close, events, mgr } = setup();
-    mgr.onActivate(["pairing"], "pairing_psk");
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
     mgr.onAbort("pin_mismatch");
     expect(close).not.toHaveBeenCalled();
     expect(events).toContain("aborted");
@@ -171,15 +196,15 @@ describe("PairingManager (pairing_psk)", () => {
 
   it("ignores a duplicate pairing activate and mints only one PSK", () => {
     const { sent, mgr } = setup();
-    expect(mgr.onActivate(["pairing"], "pairing_psk")).toBe(true);
-    expect(mgr.onActivate(["pairing"], "pairing_psk")).toBe(true);
+    expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
+    expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
     const finalizes = sent.filter((m) => m.type === "client/pair-finalize");
     expect(finalizes).toHaveLength(1);
   });
 
   it("discards the pending PSK on leave-pairing (non-pairing activate)", () => {
     const { store, sent, mgr } = setup();
-    mgr.onActivate(["pairing"], "pairing_psk");
+    mgr.onActivate(["pairing"], { method: "pairing_psk" });
     const fin = sent[0] as { payload: { long_term_psk: string } };
     mgr.onActivate(["playback"]); // leave pairing without finalize
     mgr.onPairFinalize(); // must be a no-op now
@@ -190,9 +215,11 @@ describe("PairingManager (pairing_psk)", () => {
 });
 
 describe("client/hello descriptors", () => {
-  it("advertises only pairing_psk by default", () => {
+  it("advertises only pairing_psk by default, located on the device", () => {
     const { mgr } = setup({ onPin: null });
-    expect(mgr.descriptors()).toEqual([{ method: "pairing_psk" }]);
+    expect(mgr.descriptors()).toEqual([
+      { method: "pairing_psk", locations: ["device"] },
+    ]);
   });
 
   it("advertises dynamic_pin with out_channels and min_pin_length when onPin is set", () => {
@@ -201,15 +228,39 @@ describe("client/hello descriptors", () => {
       method: "dynamic_pin",
       out_channels: ["display"],
       min_pin_length: 8,
-      locked_out: false,
     });
   });
 
-  it("advertises static_pin when a PIN is configured", () => {
+  it("advertises the configured PIN out-channels", () => {
+    const { mgr } = setup({
+      onPin: vi.fn(),
+      pinOutChannels: ["display", "speaker"],
+    });
+    const dyn = mgr.descriptors().find((d) => d.method === "dynamic_pin")!;
+    expect(dyn.out_channels).toEqual(["display", "speaker"]);
+  });
+
+  it("advertises static_pin as operator-set when a PIN is configured", () => {
     const { mgr } = setup({ onPin: null, staticPin: "12345678" });
     expect(mgr.descriptors()).toContainEqual({
       method: "static_pin",
-      locked_out: false,
+      locations: ["operator"],
+    });
+  });
+
+  it("advertises the configured secret locations", () => {
+    const { mgr } = setup({
+      onPin: null,
+      staticPin: "12345678",
+      staticPinLocations: ["device", "leaflet"],
+      pairingPskLocations: ["leaflet"],
+    });
+    const byMethod = Object.fromEntries(
+      mgr.descriptors().map((d) => [d.method, d.locations]),
+    );
+    expect(byMethod).toEqual({
+      pairing_psk: ["leaflet"],
+      static_pin: ["device", "leaflet"],
     });
   });
 
@@ -227,20 +278,25 @@ describe("client/hello descriptors", () => {
 
 describe("PairingManager (dynamic_pin)", () => {
   const PIN_LENGTH = 6;
-  const LOCKOUT_THRESHOLD = 10;
+  const ESCALATION_THRESHOLD = 10;
 
-  /** Drive one dynamic-PIN attempt through to a mismatched server tag. */
-  function failAttempt(ctx: ReturnType<typeof setup>, index: number): void {
-    ctx.mgr.onActivate(["pairing"], "dynamic_pin");
-    ctx.mgr.onPairInit({
-      nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
-      pin_length: PIN_LENGTH,
-    });
-    const shownPin = (ctx.onPin as ReturnType<typeof vi.fn>).mock.calls
+  /** The PIN most recently surfaced to the app. */
+  function shownPin(ctx: ReturnType<typeof setup>): string {
+    return (ctx.onPin as ReturnType<typeof vi.fn>).mock.calls
       .map((c) => c[0])
       .filter((p): p is string => typeof p === "string")
       .at(-1)!;
-    const server = serverPake(shownPin, index);
+  }
+
+  /** Drive one dynamic-PIN attempt through to a mismatched server tag. */
+  function failAttempt(ctx: ReturnType<typeof setup>, index: number): void {
+    ctx.mgr.onActivate(["pairing"], dynamic(PIN_LENGTH));
+    // Once escalated, every attempt waits on a gesture.
+    if (!lastOfType(ctx.sent, "client/pair-init")) ctx.mgr.openPairingWindow();
+    ctx.mgr.onPairInit({
+      nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
+    });
+    const server = serverPake(shownPin(ctx), index);
     ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
     const auth = lastOfType(ctx.sent, "client/pair-auth")!;
     server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
@@ -249,31 +305,27 @@ describe("PairingManager (dynamic_pin)", () => {
     ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
   }
 
-  function runToConfirm(opts: SetupOpts = {}) {
+  function runToConfirm(opts: SetupOpts = {}, pairing = dynamic(PIN_LENGTH)) {
     const ctx = setup({ category: "sentinel", onPin: vi.fn(), ...opts });
-    expect(ctx.mgr.onActivate(["pairing"], "dynamic_pin")).toBe(true);
+    expect(ctx.mgr.onActivate(["pairing"], pairing)).toBe(true);
 
     // client/pair-init carries commit_B = SHA-256(nonce_B).
     const init = lastOfType(ctx.sent, "client/pair-init")!;
     const commitB = base64urlDecode(init.payload!.commit_B as string);
     expect(commitB).toHaveLength(32);
 
-    // server/pair-init: nonce_A and the PIN length.
+    // server/pair-init carries only nonce_A: pin_length came with the activation.
     const nonceA = new Uint8Array(32).fill(0xa1);
-    ctx.mgr.onPairInit({
-      nonce_A: base64urlEncode(nonceA),
-      pin_length: PIN_LENGTH,
-    });
-    const shownPin = (ctx.onPin as ReturnType<typeof vi.fn>).mock
-      .calls[0]?.[0] as string;
-    expect(shownPin).toMatch(/^[0-9]{6}$/);
+    ctx.mgr.onPairInit({ nonce_A: base64urlEncode(nonceA) });
+    const pin = shownPin(ctx);
+    expect(pin).toMatch(new RegExp(`^[0-9]{${pairing.pin_length}}$`));
 
     // server/pair-auth: the server's CPace share; expect client/pair-auth back.
-    const server = serverPake(shownPin);
+    const server = serverPake(pin);
     ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
     const auth = lastOfType(ctx.sent, "client/pair-auth")!;
     server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
-    return { ...ctx, server, nonceA, commitB, shownPin };
+    return { ...ctx, server, nonceA, commitB, shownPin: pin };
   }
 
   it("completes the full flow and persists the long-term PSK", () => {
@@ -311,21 +363,62 @@ describe("PairingManager (dynamic_pin)", () => {
     );
   });
 
-  it("aborts with pin_length_unacceptable when the PIN is too short", () => {
+  it("forwards the activation's spoken-PIN languages alongside the PIN", () => {
+    const ctx = runToConfirm({}, dynamic(PIN_LENGTH, ["ca", "es", "en"]));
+    const call = (ctx.onPin as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => typeof c[0] === "string",
+    )!;
+    expect(call[1]).toEqual(["ca", "es", "en"]);
+  });
+
+  it("omits languages when the activation carries none", () => {
+    const ctx = runToConfirm();
+    const call = (ctx.onPin as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => typeof c[0] === "string",
+    )!;
+    expect(call[1]).toBeUndefined();
+  });
+
+  it("aborts with pin_length_unacceptable when the activation's PIN is too short", () => {
     const { mgr, sent, close } = setup({
       category: "sentinel",
       onPin: vi.fn(),
       minPinLength: 6,
     });
-    mgr.onActivate(["pairing"], "dynamic_pin");
-    mgr.onPairInit({
-      nonce_A: base64urlEncode(new Uint8Array(32)),
-      pin_length: 4,
-    });
+    mgr.onActivate(["pairing"], dynamic(4));
     expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
       "pin_length_unacceptable",
     );
+    expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("aborts with pin_length_unacceptable above the 12-digit maximum", () => {
+    const { mgr, sent } = setup({ category: "sentinel", onPin: vi.fn() });
+    mgr.onActivate(["pairing"], dynamic(13));
+    expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
+      "pin_length_unacceptable",
+    );
+  });
+
+  it("fails closed on a non-integer pin_length", () => {
+    const { mgr, sent, close } = setup({
+      category: "sentinel",
+      onPin: vi.fn(),
+    });
+    mgr.onActivate(["pairing"], dynamic(6.5));
+    expect(lastOfType(sent, "pair/abort")).toBeUndefined();
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("fails closed when a dynamic_pin activation omits pin_length", () => {
+    const { mgr, sent, close } = setup({
+      category: "sentinel",
+      onPin: vi.fn(),
+    });
+    mgr.onActivate(["pairing"], { method: "dynamic_pin" });
+    expect(lastOfType(sent, "pair/abort")).toBeUndefined();
+    expect(close).toHaveBeenCalled();
   });
 
   it("aborts with pin_mismatch and records a failure on a bad server tag", () => {
@@ -353,76 +446,98 @@ describe("PairingManager (dynamic_pin)", () => {
     ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(ctx.server.tag()) });
     expect(
       JSON.parse(storage.data.get("sendspin-pair-failures")!).dynamic_pin,
-    ).toBeUndefined();
+    ).toBe(0);
   });
 
-  it("refuses to pair while locked out", () => {
-    const storage = memStorage();
-    storage.setItem(
-      "sendspin-pair-failures",
-      JSON.stringify({ dynamic_pin: 10 }),
-    );
-    const { mgr, sent, close } = setup({
-      category: "sentinel",
-      onPin: vi.fn(),
-      storage,
-    });
-    expect(mgr.isLockedOut("dynamic_pin")).toBe(true);
-    expect(
-      mgr.descriptors().find((d) => d.method === "dynamic_pin")!.locked_out,
-    ).toBe(true);
-    mgr.onActivate(["pairing"], "dynamic_pin");
-    expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe("locked_out");
-    expect(close).not.toHaveBeenCalled();
-  });
-
-  it("clearLockout resets the counter and admits attempts again", () => {
-    const storage = memStorage();
-    storage.setItem(
-      "sendspin-pair-failures",
-      JSON.stringify({ dynamic_pin: 10 }),
-    );
-    const { mgr } = setup({ category: "sentinel", onPin: vi.fn(), storage });
-    expect(mgr.isLockedOut("dynamic_pin")).toBe(true);
-    mgr.clearLockout("dynamic_pin");
-    expect(mgr.isLockedOut("dynamic_pin")).toBe(false);
-    expect(
-      JSON.parse(storage.data.get("sendspin-pair-failures")!).dynamic_pin,
-    ).toBeUndefined();
-  });
-
-  it("locks out on the tenth consecutive PIN mismatch", () => {
+  it("escalates on the tenth consecutive PIN mismatch", () => {
     const ctx = setup({
       category: "sentinel",
       onPin: vi.fn(),
       storage: memStorage(),
     });
-    for (let i = 1; i < LOCKOUT_THRESHOLD; i++) failAttempt(ctx, i);
-    expect(ctx.mgr.isLockedOut("dynamic_pin")).toBe(false);
-    failAttempt(ctx, LOCKOUT_THRESHOLD);
-    expect(ctx.mgr.isLockedOut("dynamic_pin")).toBe(true);
+    for (let i = 1; i < ESCALATION_THRESHOLD; i++) failAttempt(ctx, i);
+    expect(ctx.mgr.isDynamicPinEscalated()).toBe(false);
+    failAttempt(ctx, ESCALATION_THRESHOLD);
+    expect(ctx.mgr.isDynamicPinEscalated()).toBe(true);
   });
 
-  it("fails closed on a non-integer pin_length", () => {
-    const { mgr, sent, close } = setup({
+  it("gesture-gates every attempt once escalated, and still offers the method", () => {
+    const storage = memStorage();
+    storage.setItem(
+      "sendspin-pair-failures",
+      JSON.stringify({ dynamic_pin: 10 }),
+    );
+    const { mgr, sent, events, close } = setup({
       category: "sentinel",
       onPin: vi.fn(),
+      storage,
     });
-    mgr.onActivate(["pairing"], "dynamic_pin");
-    mgr.onPairInit({
-      nonce_A: base64urlEncode(new Uint8Array(32)),
-      pin_length: 6.5,
+    expect(mgr.descriptors().map((d) => d.method)).toContain("dynamic_pin");
+
+    mgr.onActivate(["pairing"], dynamic());
+    expect(lastOfType(sent, "client/pair-pending")!.payload).toEqual({
+      pairing_index: 1,
     });
-    expect(lastOfType(sent, "pair/abort")).toBeUndefined();
-    expect(close).toHaveBeenCalled();
+    expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
+    expect(events).toContain("pending");
+    expect(close).not.toHaveBeenCalled();
+
+    mgr.openPairingWindow();
+    expect(lastOfType(sent, "client/pair-init")).toBeDefined();
+  });
+
+  it("de-escalates once a round verifies, so the next attempt needs no gesture", () => {
+    const storage = memStorage();
+    storage.setItem(
+      "sendspin-pair-failures",
+      JSON.stringify({ dynamic_pin: 10 }),
+    );
+    const ctx = setup({ category: "sentinel", onPin: vi.fn(), storage });
+    ctx.mgr.onActivate(["pairing"], dynamic(PIN_LENGTH));
+    ctx.mgr.openPairingWindow();
+    ctx.mgr.onPairInit({
+      nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
+    });
+    const server = serverPake(shownPin(ctx));
+    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
+    const auth = lastOfType(ctx.sent, "client/pair-auth")!;
+    server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+    ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(server.tag()) });
+    ctx.mgr.onPairFinalize();
+
+    expect(ctx.mgr.isDynamicPinEscalated()).toBe(false);
+    ctx.mgr.onActivate(["pairing"], dynamic(PIN_LENGTH));
+    expect(
+      lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
+    ).toBe(2);
+  });
+
+  it("gesture-gates a PIN shorter than 6 digits even when not escalated", () => {
+    const { mgr, sent } = setup({
+      category: "sentinel",
+      onPin: vi.fn(),
+      minPinLength: 4,
+    });
+    mgr.onActivate(["pairing"], dynamic(5));
+    expect(lastOfType(sent, "client/pair-pending")).toBeDefined();
+    expect(lastOfType(sent, "client/pair-init")).toBeUndefined();
+
+    mgr.openPairingWindow();
+    expect(lastOfType(sent, "client/pair-init")).toBeDefined();
+  });
+
+  it("sends pair-init immediately for a 6-digit PIN", () => {
+    const { mgr, sent } = setup({ category: "sentinel", onPin: vi.fn() });
+    mgr.onActivate(["pairing"], dynamic(6));
+    expect(lastOfType(sent, "client/pair-pending")).toBeUndefined();
+    expect(lastOfType(sent, "client/pair-init")).toBeDefined();
   });
 
   it("fails closed on a low-order server share", () => {
     const ctx = setup({ category: "sentinel", onPin: vi.fn() });
-    ctx.mgr.onActivate(["pairing"], "dynamic_pin");
+    ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.onPairInit({
       nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
-      pin_length: 6,
     });
     ctx.mgr.onPairAuth({
       pake_msg_1: base64urlEncode(new Uint8Array(32)), // u = 0
@@ -436,7 +551,7 @@ describe("PairingManager (dynamic_pin)", () => {
       category: "sentinel",
       onPin: vi.fn(),
     });
-    mgr.onActivate(["pairing"], "dynamic_pin");
+    mgr.onActivate(["pairing"], dynamic());
     mgr.onPairConfirm({ server_kc: base64urlEncode(new Uint8Array(64)) });
     expect(lastOfType(sent, "pair/abort")).toBeUndefined();
     expect(close).toHaveBeenCalled();
@@ -461,18 +576,15 @@ describe("PairingManager (dynamic_pin)", () => {
 
   it("keeps the connection open and advances pairing_index on a retry", () => {
     const ctx = setup({ category: "sentinel", onPin: vi.fn() });
-    ctx.mgr.onActivate(["pairing"], "dynamic_pin");
+    ctx.mgr.onActivate(["pairing"], dynamic());
     expect(
       lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
     ).toBe(1);
     // First attempt aborts (PIN too short); the connection stays open.
-    ctx.mgr.onPairInit({
-      nonce_A: base64urlEncode(new Uint8Array(32)),
-      pin_length: 3,
-    });
+    ctx.mgr.onActivate(["playback"]);
     expect(ctx.close).not.toHaveBeenCalled();
     // A fresh pairing activate starts a new attempt with the next index.
-    ctx.mgr.onActivate(["pairing"], "dynamic_pin");
+    ctx.mgr.onActivate(["pairing"], dynamic());
     expect(
       lastOfType(ctx.sent, "client/pair-init")!.payload!.pairing_index,
     ).toBe(2);
@@ -480,7 +592,7 @@ describe("PairingManager (dynamic_pin)", () => {
 
   it("silently discards a stray pairing message after the attempt ended", () => {
     const ctx = setup({ category: "sentinel", onPin: vi.fn() });
-    ctx.mgr.onActivate(["pairing"], "dynamic_pin");
+    ctx.mgr.onActivate(["pairing"], dynamic());
     ctx.mgr.cancelPairing(); // attempt ends, connection stays open
     // A late server/pair-auth for the ended attempt is ignored, not fatal.
     ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(new Uint8Array(32)) });
@@ -504,10 +616,16 @@ describe("PairingManager (static_pin)", () => {
     return server;
   }
 
-  it("waits for the pairing-window gesture before sending pair-init", () => {
+  it("signals pair-pending and waits for the gesture before sending pair-init", () => {
     const ctx = staticSetup();
-    expect(ctx.mgr.onActivate(["pairing"], "static_pin")).toBe(true);
+    expect(ctx.mgr.onActivate(["pairing"], { method: "static_pin" })).toBe(
+      true,
+    );
+    expect(lastOfType(ctx.sent, "client/pair-pending")!.payload).toEqual({
+      pairing_index: 1,
+    });
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeUndefined();
+    expect(ctx.events).toContain("pending");
 
     ctx.mgr.openPairingWindow();
     const init = lastOfType(ctx.sent, "client/pair-init")!;
@@ -531,21 +649,46 @@ describe("PairingManager (static_pin)", () => {
     expect(ctx.store.lookup(pskId(ltPsk))?.serverId).toBe("SERVER_ID");
   });
 
-  it("starts immediately when the window was opened before activation", () => {
+  it("starts immediately, with no pair-pending, when the window was already open", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
-    ctx.mgr.onActivate(["pairing"], "static_pin");
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
+  });
+
+  it("keeps no failure counter: repeated mismatches never escalate", () => {
+    const storage = memStorage();
+    const ctx = setup({
+      category: "sentinel",
+      onPin: null,
+      staticPin: STATIC_PIN,
+      storage,
+    });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.openPairingWindow();
+    const server = serverPake(STATIC_PIN);
+    ctx.mgr.onPairAuth({ pake_msg_1: base64urlEncode(server.publicShare) });
+    const auth = lastOfType(ctx.sent, "client/pair-auth")!;
+    server.derive(base64urlDecode(auth.payload!.pake_msg_2 as string));
+    const badTag = server.tag().slice();
+    badTag[0] ^= 1;
+    ctx.mgr.onPairConfirm({ server_kc: base64urlEncode(badTag) });
+
+    expect(lastOfType(ctx.sent, "pair/abort")!.payload!.reason).toBe(
+      "pin_mismatch",
+    );
+    expect(storage.data.get("sendspin-pair-failures")).toBeUndefined();
   });
 
   it("the window admits exactly one attempt", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
-    ctx.mgr.onActivate(["pairing"], "static_pin");
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
     completeFrom(ctx);
     ctx.mgr.onPairFinalize();
     // A new activate must wait for a fresh gesture.
-    ctx.mgr.onActivate(["pairing"], "static_pin");
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
     const inits = ctx.sent.filter((m) => m.type === "client/pair-init");
     expect(inits).toHaveLength(1);
   });
@@ -554,7 +697,7 @@ describe("PairingManager (static_pin)", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
     ctx.mgr.reset();
-    ctx.mgr.onActivate(["pairing"], "static_pin");
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeUndefined();
   });
 });
@@ -568,7 +711,7 @@ describe("PairingManager timers", () => {
       category: "sentinel",
       onPin: vi.fn(),
     });
-    mgr.onActivate(["pairing"], "dynamic_pin");
+    mgr.onActivate(["pairing"], { method: "dynamic_pin", pin_length: 6 });
     vi.advanceTimersByTime(120_000);
     expect(lastOfType(sent, "pair/abort")!.payload!.reason).toBe(
       "attempt_timeout",
@@ -584,21 +727,25 @@ describe("PairingManager timers", () => {
     });
     ctx.mgr.openPairingWindow();
     vi.advanceTimersByTime(300_000);
-    ctx.mgr.onActivate(["pairing"], "static_pin");
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
     // Window expired: the attempt waits for a fresh gesture.
     expect(lastOfType(ctx.sent, "client/pair-init")).toBeUndefined();
     expect(ctx.close).not.toHaveBeenCalled();
   });
 
-  it("closes when the operator never opens the window", () => {
+  it("waits indefinitely for the gesture, leaving the timeout to the server", () => {
     const ctx = setup({
       category: "sentinel",
       onPin: null,
       staticPin: "31415926",
     });
-    ctx.mgr.onActivate(["pairing"], "static_pin");
-    vi.advanceTimersByTime(300_000);
-    expect(ctx.close).toHaveBeenCalled();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    vi.advanceTimersByTime(600_000);
+    expect(ctx.close).not.toHaveBeenCalled();
+    expect(lastOfType(ctx.sent, "pair/abort")).toBeUndefined();
+    // The gesture still starts the attempt after the wait.
+    ctx.mgr.openPairingWindow();
+    expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
   });
 
   it("static attempts also honor the attempt timeout", () => {
@@ -607,7 +754,7 @@ describe("PairingManager timers", () => {
       onPin: null,
       staticPin: "31415926",
     });
-    ctx.mgr.onActivate(["pairing"], "static_pin");
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
     ctx.mgr.openPairingWindow();
     vi.advanceTimersByTime(120_000);
     expect(lastOfType(ctx.sent, "pair/abort")!.payload!.reason).toBe(

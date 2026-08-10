@@ -54,13 +54,10 @@ export function authorizeActivate(
   activities: Activity[],
   activeRoles: string[] | undefined,
   unpairedAccess: boolean,
-  selectedPairMethod?: string,
 ): AuthResult {
+  // The activation's `pairing` object is ignored unless 'pairing' is in
+  // activities, so it never bears on authorization.
   const set = new Set(activities);
-  // selected_pair_method must be absent unless 'pairing' is in activities.
-  if (selectedPairMethod != null && !set.has("pairing")) {
-    return { ok: false, goodbye: "unauthorized" };
-  }
   const hasActiveRoles = !!activeRoles && activeRoles.length > 0;
 
   if (isAdmissible(category, set, hasActiveRoles, unpairedAccess)) {

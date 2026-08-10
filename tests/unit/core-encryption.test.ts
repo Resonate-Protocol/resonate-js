@@ -306,7 +306,7 @@ describe("SendspinCore encryption wiring", () => {
       payload: {
         activities: ["pairing"],
         active_roles: [],
-        selected_pair_method: "pairing_psk",
+        pairing: { method: "pairing_psk" },
       },
     });
 
@@ -347,7 +347,7 @@ describe("SendspinCore encryption wiring", () => {
       payload: {
         activities: ["pairing"],
         active_roles: [],
-        selected_pair_method: "pairing_psk",
+        pairing: { method: "pairing_psk" },
       },
     });
     expect(events).toContain("started");

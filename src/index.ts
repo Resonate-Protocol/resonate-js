@@ -10,7 +10,6 @@ import type {
   ControllerCommand,
   ControllerCommands,
   CorrectionMode,
-  PairMethod,
 } from "./types";
 
 // Platform detection utilities
@@ -340,8 +339,10 @@ export class SendspinPlayer {
   }
 
   /**
-   * Operator gesture that opens the static-PIN pairing window (~5 minutes,
-   * admits one attempt). Required before each static PIN pairing attempt.
+   * Operator gesture that opens the pairing window (~5 minutes, admits one
+   * attempt). Required before each gesture-gated attempt: every static PIN
+   * attempt, and dynamic PIN when escalated or the PIN is shorter than 6.
+   * The "pending" pairing event fires when an attempt is waiting on this.
    */
   openPairingWindow(): void {
     this.core.openPairingWindow();
@@ -352,14 +353,9 @@ export class SendspinPlayer {
     this.core.cancelPairing();
   }
 
-  /** Whether a PIN pairing method is in terminal lockout (10 failures). */
-  isPairingLockedOut(method: PairMethod): boolean {
-    return this.core.isPairingLockedOut(method);
-  }
-
-  /** Local operator action that exits terminal lockout for a PIN method. */
-  clearPairingLockout(method: PairMethod): void {
-    this.core.clearPairingLockout(method);
+  /** Whether dynamic PIN has escalated to gesture-gating (10 failures). */
+  isDynamicPinEscalated(): boolean {
+    return this.core.isDynamicPinEscalated();
   }
 
   // Get current correction mode

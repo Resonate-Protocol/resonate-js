@@ -19,6 +19,7 @@ export enum MessageType {
   SERVER_INIT = "server/init",
   NOISE_HANDSHAKE = "noise/handshake",
   SERVER_ACTIVATE = "server/activate",
+  CLIENT_PAIR_PENDING = "client/pair-pending",
   CLIENT_PAIR_INIT = "client/pair-init",
   SERVER_PAIR_INIT = "server/pair-init",
   SERVER_PAIR_AUTH = "server/pair-auth",
@@ -248,6 +249,9 @@ export type PairMethod = "pairing_psk" | "dynamic_pin" | "static_pin";
 /** Out-channels through which a client can convey the dynamic PIN. */
 export type PairOutChannel = "display" | "speaker" | "other";
 
+/** Where the operator can find a static pairing secret. */
+export type PairSecretLocation = "device" | "leaflet" | "operator";
+
 /** A client/hello pairing-method descriptor. */
 export interface PairMethodDescriptor {
   method: PairMethod;
@@ -255,8 +259,8 @@ export interface PairMethodDescriptor {
   out_channels?: PairOutChannel[];
   /** Dynamic PIN only: shortest PIN length the client accepts (4-12). */
   min_pin_length?: number;
-  /** PIN methods only: whether the method is in terminal lockout. */
-  locked_out?: boolean;
+  /** Static PIN and Pairing PSK only: where the operator finds the secret. */
+  locations?: PairSecretLocation[];
 }
 
 export interface ClientInit {
@@ -274,13 +278,27 @@ export interface NoiseHandshake {
   payload: { data: string };
 }
 
+/** Parameters of the pairing attempt a pairing server/activate admits. */
+export interface ActivatePairing {
+  method: PairMethod;
+  /** Dynamic PIN only: the PIN length for this session (4-12). */
+  pin_length?: number;
+  /** Dynamic PIN only: BCP 47 tags in descending operator preference. */
+  languages?: string[];
+}
+
 export interface ServerActivate {
   type: MessageType.SERVER_ACTIVATE;
   payload: {
     activities: Array<"playback" | "pairing" | "management">;
     active_roles?: string[];
-    selected_pair_method?: PairMethod;
+    pairing?: ActivatePairing;
   };
+}
+
+export interface ClientPairPending {
+  type: MessageType.CLIENT_PAIR_PENDING;
+  payload: { pairing_index: number };
 }
 
 export interface ClientPairInit {
@@ -291,7 +309,7 @@ export interface ClientPairInit {
 
 export interface ServerPairInit {
   type: MessageType.SERVER_PAIR_INIT;
-  payload: { nonce_A: string; pin_length: number };
+  payload: { nonce_A: string };
 }
 
 export interface ServerPairAuth {
@@ -329,7 +347,6 @@ export interface ServerPairFinalize {
 export type PairAbortReason =
   | "attempt_timeout"
   | "concurrent_attempt"
-  | "locked_out"
   | "method_not_supported"
   | "pin_length_unacceptable"
   | "pin_mismatch"
@@ -681,22 +698,37 @@ export interface SendspinCoreConfig {
    */
   longTermPsks?: Array<{ psk: string; serverId?: string }>;
 
-  /** Callback for pairing lifecycle events. */
+  /**
+   * Callback for pairing lifecycle events. "pending" means the attempt is
+   * gesture-gated and waiting for openPairingWindow().
+   */
   onPairing?: (
-    event: "started" | "finalized" | "aborted",
+    event: "pending" | "started" | "finalized" | "aborted",
     detail?: string,
   ) => void;
 
   /**
    * Enables dynamic PIN pairing: called with the PIN the operator must enter
    * into the server, and with null when the attempt ends (hide the PIN).
+   * languages carries the operator's preferred BCP 47 tags for spoken
+   * emission, in descending preference, and is absent if the server sent none.
    */
-  onPairingPin?: (pin: string | null) => void;
+  onPairingPin?: (pin: string | null, languages?: string[]) => void;
+
+  /**
+   * Channels through which this client conveys the dynamic PIN, advertised in
+   * the dynamic_pin descriptor. Default ["display"]. Include "speaker" to have
+   * servers send their operator's language preferences to onPairingPin.
+   */
+  pinOutChannels?: PairOutChannel[];
 
   /**
    * Shortest dynamic PIN length this client accepts (4-12). Default 6.
    * A compliant server always picks at least this length, so the client
    * aborts only if a misbehaving server proposes a shorter one.
+   *
+   * Below 6 the client gesture-gates each attempt, so openPairingWindow()
+   * becomes mandatory for dynamic PIN pairing as well.
    */
   minPinLength?: number;
 
@@ -705,6 +737,12 @@ export interface SendspinCoreConfig {
    * window must be opened with openPairingWindow() before each attempt.
    */
   staticPin?: string;
+
+  /** Where the operator finds the static PIN. Default ["operator"]. */
+  staticPinLocations?: PairSecretLocation[];
+
+  /** Where the operator finds the Pairing PSK. Default ["device"]. */
+  pairingPskLocations?: PairSecretLocation[];
 
   /** Callback when player state changes (local or from server). */
   onStateChange?: (state: {

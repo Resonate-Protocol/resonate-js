@@ -29,6 +29,8 @@ const STORAGE_KEYS = {
   RESYNC_THRESHOLD: "sendspin-resync-threshold",
   DEADBAND_THRESHOLD: "sendspin-deadband-threshold",
   STATIC_PIN: "sendspin-sample-static-pin",
+  STATIC_PIN_LOCATION: "sendspin-sample-static-pin-location",
+  PIN_SPEAKER: "sendspin-sample-pin-speaker",
 };
 
 // DOM Elements
@@ -63,11 +65,16 @@ const trustLevelEl = document.getElementById("trust-level");
 const unpairedAccessCheckbox = document.getElementById("unpaired-access");
 const pairingPinGroup = document.getElementById("pairing-pin-group");
 const pairingPinEl = document.getElementById("pairing-pin");
+const pairingPinHint = document.getElementById("pairing-pin-hint");
+const pairingPendingGroup = document.getElementById("pairing-pending-group");
 const cancelPairingBtn = document.getElementById("cancel-pairing");
 const staticPinInput = document.getElementById("static-pin");
+const staticPinLocationsSelect = document.getElementById(
+  "static-pin-locations",
+);
+const pinSpeakerInput = document.getElementById("pin-speaker");
 const openPairingWindowBtn = document.getElementById("open-pairing-window");
-const pinLockoutEl = document.getElementById("pin-lockout");
-const clearLockoutBtn = document.getElementById("clear-lockout");
+const pinEscalatedEl = document.getElementById("pin-escalated");
 
 // Status elements
 const connectionStatus = document.getElementById("connection-status");
@@ -228,8 +235,9 @@ function resetStatusDisplay() {
   pairingTokenEl.textContent = "-";
   trustLevelEl.textContent = "-";
   pairingPinGroup.hidden = true;
+  pairingPendingGroup.hidden = true;
   pairingPinEl.textContent = "-";
-  pinLockoutEl.textContent = "-";
+  pinEscalatedEl.textContent = "-";
 }
 
 /**
@@ -238,7 +246,7 @@ function resetStatusDisplay() {
 function updatePairingDisplay() {
   clientIdEl.textContent = player.clientId;
   pairingTokenEl.textContent = pairingTokenForDisplay();
-  updateLockoutDisplay();
+  updateEscalationDisplay();
 }
 
 function isValidStaticPin(pin) {
@@ -250,14 +258,11 @@ function pairingTokenForDisplay() {
 }
 
 /**
- * Show which PIN methods are in terminal lockout.
+ * Show whether dynamic PIN has escalated to gesture-gating.
  */
-function updateLockoutDisplay() {
+function updateEscalationDisplay() {
   if (!player) return;
-  const locked = ["dynamic_pin", "static_pin"].filter((m) =>
-    player.isPairingLockedOut(m),
-  );
-  pinLockoutEl.textContent = locked.length ? locked.join(", ") : "none";
+  pinEscalatedEl.textContent = player.isDynamicPinEscalated() ? "yes" : "no";
 }
 
 /**
@@ -265,7 +270,11 @@ function updateLockoutDisplay() {
  */
 function onPairing(event, detail) {
   console.log("Pairing event:", event, detail ?? "");
-  if (event === "started") {
+  pairingPendingGroup.hidden = event !== "pending";
+  if (event === "pending") {
+    trustLevelEl.textContent = "awaiting gesture...";
+    showToast("Pairing needs the window opened", "info");
+  } else if (event === "started") {
     trustLevelEl.textContent = "pairing...";
   } else if (event === "finalized") {
     trustLevelEl.textContent = "user (just paired)";
@@ -274,15 +283,59 @@ function onPairing(event, detail) {
     trustLevelEl.textContent = `aborted (${detail ?? "unknown"})`;
     showToast(`Pairing aborted: ${detail ?? "unknown"}`, "error");
   }
-  updateLockoutDisplay();
+  updateEscalationDisplay();
 }
 
 /**
- * Show or hide the dynamic pairing PIN (null = attempt ended).
+ * Show or hide the dynamic pairing PIN (null = attempt ended). languages is
+ * the server's spoken-PIN preference, absent when it sent none.
  */
-function onPairingPin(pin) {
+function onPairingPin(pin, languages) {
   pairingPinGroup.hidden = pin === null;
   pairingPinEl.textContent = pin ?? "-";
+  pairingPinHint.textContent = languages?.length
+    ? `Enter this PIN into the server. Spoken preference: ${languages.join(", ")}.`
+    : "Enter this PIN into the server to complete pairing.";
+  if (pin !== null && pinSpeakerInput.checked) speakPin(pin, languages);
+}
+
+/**
+ * Read the PIN aloud, picking the best voice for the server's language
+ * preferences under RFC 4647 Lookup matching.
+ */
+function speakPin(pin, languages) {
+  if (typeof speechSynthesis === "undefined") return;
+  const utterance = new SpeechSynthesisUtterance(pin.split("").join(" "));
+  const voice = bestVoice(languages ?? []);
+  if (voice) {
+    utterance.voice = voice;
+    utterance.lang = voice.lang;
+  }
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utterance);
+}
+
+/**
+ * Lookup matching: try each tag in order, truncating at "-" until a voice
+ * matches. Returns undefined so the browser default applies.
+ */
+function bestVoice(languages) {
+  const voices = speechSynthesis.getVoices();
+  for (const tag of languages) {
+    let candidate = tag.toLowerCase();
+    while (candidate) {
+      const match = voices.find(
+        (v) =>
+          v.lang.toLowerCase() === candidate ||
+          v.lang.toLowerCase().startsWith(`${candidate}-`),
+      );
+      if (match) return match;
+      const cut = candidate.lastIndexOf("-");
+      if (cut < 0) break;
+      candidate = candidate.slice(0, cut);
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -510,6 +563,16 @@ function loadSettings() {
     staticPinInput.value = savedStaticPin;
   }
 
+  const savedPinLocation = localStorage.getItem(
+    STORAGE_KEYS.STATIC_PIN_LOCATION,
+  );
+  if (savedPinLocation !== null) {
+    staticPinLocationsSelect.value = savedPinLocation;
+  }
+
+  pinSpeakerInput.checked =
+    localStorage.getItem(STORAGE_KEYS.PIN_SPEAKER) === "true";
+
   const savedCorrectionMode = localStorage.getItem(
     STORAGE_KEYS.CORRECTION_MODE,
   );
@@ -682,6 +745,10 @@ async function connect() {
       staticPin: isValidStaticPin(staticPinInput.value)
         ? staticPinInput.value
         : undefined,
+      staticPinLocations: [staticPinLocationsSelect.value],
+      pinOutChannels: pinSpeakerInput.checked
+        ? ["display", "speaker"]
+        : ["display"],
       onPairing,
       onPairingPin,
       onStateChange,
@@ -913,6 +980,20 @@ function init() {
     localStorage.setItem(STORAGE_KEYS.STATIC_PIN, pin);
     if (player) showToast("Static PIN applies on the next connect", "info");
   });
+  staticPinLocationsSelect.addEventListener("change", () => {
+    localStorage.setItem(
+      STORAGE_KEYS.STATIC_PIN_LOCATION,
+      staticPinLocationsSelect.value,
+    );
+    if (player) showToast("PIN location applies on the next connect", "info");
+  });
+  pinSpeakerInput.addEventListener("change", () => {
+    localStorage.setItem(
+      STORAGE_KEYS.PIN_SPEAKER,
+      String(pinSpeakerInput.checked),
+    );
+    if (player) showToast("Out-channels apply on the next connect", "info");
+  });
   openPairingWindowBtn.addEventListener("click", () => {
     if (!player) {
       showToast("Connect first", "error");
@@ -925,17 +1006,6 @@ function init() {
     if (!player) return;
     player.cancelPairing();
     showToast("Pairing cancelled", "info");
-  });
-  clearLockoutBtn.addEventListener("click", () => {
-    if (!player) {
-      showToast("Connect first", "error");
-      return;
-    }
-    for (const method of ["dynamic_pin", "static_pin"]) {
-      player.clearPairingLockout(method);
-    }
-    updateLockoutDisplay();
-    showToast("PIN lockout cleared", "success");
   });
 
   // Transport control event listeners
