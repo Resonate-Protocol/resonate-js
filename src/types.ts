@@ -453,9 +453,9 @@ export interface SendspinPlayerConfig extends SendspinCoreConfig {
   >;
 
   /**
-   * Use browser's output latency API for automatic latency compensation.
-   * When enabled, reads AudioContext.baseLatency and outputLatency to
-   * compensate for hardware delay (e.g., Bluetooth headphones).
+   * Use automatic output latency compensation.
+   * When enabled, reads AudioContext.baseLatency and outputLatency and applies
+   * platform fallbacks where those APIs underreport the output path.
    *
    * Note: API reliability varies by browser/platform. But generally works well,
    * especially on modern mobile browsers.
