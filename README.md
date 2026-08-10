@@ -181,7 +181,8 @@ const player = new SendspinPlayer({
   pinOutChannels: ['display'], // add "speaker" to receive `languages`
   // Static PIN pairing: this device's fixed 8-digit PIN.
   staticPin: '31415926',
-  staticPinLocations: ['operator'],  // where the operator finds it: device | leaflet | operator
+  // Where the operator finds each secret. Any combination of device | leaflet | operator.
+  staticPinLocations: ['device', 'leaflet'],
   pairingPskLocations: ['device'],
 });
 

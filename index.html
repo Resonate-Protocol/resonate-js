@@ -388,16 +388,23 @@
               attempt.</small
             >
           </div>
-          <div class="form-group">
-            <label for="static-pin-locations">Static PIN location</label>
-            <select id="static-pin-locations">
-              <option value="operator">Set by the operator</option>
-              <option value="device">Printed on the device</option>
-              <option value="leaflet">On a leaflet in the box</option>
-            </select>
+          <div class="form-group" id="static-pin-locations">
+            <label>Static PIN locations</label>
+            <label>
+              <input type="checkbox" value="device" />
+              Printed on the device
+            </label>
+            <label>
+              <input type="checkbox" value="leaflet" />
+              On a leaflet in the box
+            </label>
+            <label>
+              <input type="checkbox" value="operator" checked />
+              Set by the operator
+            </label>
             <small
-              >Hint telling the server where to point the operator. Applied on
-              connect.</small
+              >Hint telling the server where to point the operator. Pick any
+              combination, or none to omit the hint. Applied on connect.</small
             >
           </div>
           <div class="form-group">

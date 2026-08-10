@@ -29,7 +29,7 @@ const STORAGE_KEYS = {
   RESYNC_THRESHOLD: "sendspin-resync-threshold",
   DEADBAND_THRESHOLD: "sendspin-deadband-threshold",
   STATIC_PIN: "sendspin-sample-static-pin",
-  STATIC_PIN_LOCATION: "sendspin-sample-static-pin-location",
+  STATIC_PIN_LOCATIONS: "sendspin-sample-static-pin-locations",
   PIN_SPEAKER: "sendspin-sample-pin-speaker",
 };
 
@@ -69,8 +69,8 @@ const pairingPinHint = document.getElementById("pairing-pin-hint");
 const pairingPendingGroup = document.getElementById("pairing-pending-group");
 const cancelPairingBtn = document.getElementById("cancel-pairing");
 const staticPinInput = document.getElementById("static-pin");
-const staticPinLocationsSelect = document.getElementById(
-  "static-pin-locations",
+const staticPinLocationInputs = document.querySelectorAll(
+  "#static-pin-locations input[type=checkbox]",
 );
 const pinSpeakerInput = document.getElementById("pin-speaker");
 const openPairingWindowBtn = document.getElementById("open-pairing-window");
@@ -251,6 +251,13 @@ function updatePairingDisplay() {
 
 function isValidStaticPin(pin) {
   return /^[0-9]{8}$/.test(pin);
+}
+
+/** The checked static-PIN location hints, in spec order. */
+function selectedStaticPinLocations() {
+  return Array.from(staticPinLocationInputs)
+    .filter((input) => input.checked)
+    .map((input) => input.value);
 }
 
 function pairingTokenForDisplay() {
@@ -563,11 +570,14 @@ function loadSettings() {
     staticPinInput.value = savedStaticPin;
   }
 
-  const savedPinLocation = localStorage.getItem(
-    STORAGE_KEYS.STATIC_PIN_LOCATION,
+  const savedPinLocations = localStorage.getItem(
+    STORAGE_KEYS.STATIC_PIN_LOCATIONS,
   );
-  if (savedPinLocation !== null) {
-    staticPinLocationsSelect.value = savedPinLocation;
+  if (savedPinLocations !== null) {
+    const picked = JSON.parse(savedPinLocations);
+    staticPinLocationInputs.forEach((input) => {
+      input.checked = picked.includes(input.value);
+    });
   }
 
   pinSpeakerInput.checked =
@@ -745,7 +755,10 @@ async function connect() {
       staticPin: isValidStaticPin(staticPinInput.value)
         ? staticPinInput.value
         : undefined,
-      staticPinLocations: [staticPinLocationsSelect.value],
+      // Omitted entirely when nothing is picked: the hint is optional.
+      staticPinLocations: selectedStaticPinLocations().length
+        ? selectedStaticPinLocations()
+        : undefined,
       pinOutChannels: pinSpeakerInput.checked
         ? ["display", "speaker"]
         : ["display"],
@@ -980,12 +993,14 @@ function init() {
     localStorage.setItem(STORAGE_KEYS.STATIC_PIN, pin);
     if (player) showToast("Static PIN applies on the next connect", "info");
   });
-  staticPinLocationsSelect.addEventListener("change", () => {
-    localStorage.setItem(
-      STORAGE_KEYS.STATIC_PIN_LOCATION,
-      staticPinLocationsSelect.value,
-    );
-    if (player) showToast("PIN location applies on the next connect", "info");
+  staticPinLocationInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      localStorage.setItem(
+        STORAGE_KEYS.STATIC_PIN_LOCATIONS,
+        JSON.stringify(selectedStaticPinLocations()),
+      );
+      if (player) showToast("PIN locations apply on the next connect", "info");
+    });
   });
   pinSpeakerInput.addEventListener("change", () => {
     localStorage.setItem(
