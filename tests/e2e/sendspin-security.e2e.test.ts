@@ -438,16 +438,17 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
   );
 
   it(
-    "persists Dynamic PIN lockout after ten mismatches",
+    "escalates Dynamic PIN to gesture-gating after ten mismatches",
     async () => {
       const storage = memoryStorage();
       const pins: string[] = [];
+      const collectPin = (pin: string | null) => {
+        if (pin !== null) pins.push(pin);
+      };
       const connection = await connect({
-        clientName: "Dynamic PIN lockout client",
+        clientName: "Dynamic PIN escalation client",
         storage,
-        onPairingPin: (pin) => {
-          if (pin !== null) pins.push(pin);
-        },
+        onPairingPin: collectPin,
       });
 
       for (let attempt = 0; attempt < 10; attempt++) {
@@ -457,7 +458,7 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
         const result = await server.submitPin(wrongPin(pins[attempt]));
         expectPairingResult(result, "aborted", "pin_mismatch");
       }
-      expect(connection.core.isPairingLockedOut("dynamic_pin")).toBe(true);
+      expect(connection.core.isDynamicPinEscalated()).toBe(true);
       expect(await server.hasPairingRecord(connection.core.clientId)).toBe(
         false,
       );
@@ -466,16 +467,23 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
       connection.socket.close();
       await waitForClose(connection.socket);
       const reconnected = await connect({
-        clientName: "Dynamic PIN lockout client",
+        clientName: "Dynamic PIN escalation client",
         storage,
-        onPairingPin: () => undefined,
+        onPairingPin: collectPin,
       });
-      expect(reconnected.core.isPairingLockedOut("dynamic_pin")).toBe(true);
+      // The counter survived the reconnect, so the method stays escalated: the
+      // client withholds pair-init until the operator opens the window.
+      expect(reconnected.core.isDynamicPinEscalated()).toBe(true);
       await server.beginPinPairing("dynamic_pin");
-      const locked = await server.waitForPinRequest();
-      expect(locked.status).toBe("aborted");
-      expect((locked as PairingResult).reason).toBe("locked_out");
-      reconnected.core.clearPairingLockout("dynamic_pin");
+      expect((await server.waitForPinRequest(200)).status).toBe("timeout");
+      expect(reconnected.socket.readyState).toBe(WebSocket.OPEN);
+
+      reconnected.core.openPairingWindow();
+      expect((await server.waitForPinRequest()).status).toBe("pin_requested");
+      await waitFor(() => pins.length === 11);
+      expectPairingResult(await server.submitPin(pins[10]), "success");
+      // A verified round de-escalates the method.
+      expect(reconnected.core.isDynamicPinEscalated()).toBe(false);
     },
     TEST_TIMEOUT_MS,
   );
