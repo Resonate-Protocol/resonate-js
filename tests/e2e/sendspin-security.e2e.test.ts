@@ -62,7 +62,10 @@ interface ConnectOptions {
   storage?: SendspinStorage;
   onPairing?: SendspinCoreConfig["onPairing"];
   onPairingPin?: SendspinCoreConfig["onPairingPin"];
+  pinOutChannels?: SendspinCoreConfig["pinOutChannels"];
   staticPin?: string;
+  staticPinLocations?: SendspinCoreConfig["staticPinLocations"];
+  pairingPskLocations?: SendspinCoreConfig["pairingPskLocations"];
   unpairedAccess?: boolean;
 }
 
@@ -127,7 +130,10 @@ async function connectCore(
     unpairedAccess: options.unpairedAccess ?? false,
     onPairing: options.onPairing,
     onPairingPin: options.onPairingPin,
+    pinOutChannels: options.pinOutChannels,
     staticPin: options.staticPin,
+    staticPinLocations: options.staticPinLocations,
+    pairingPskLocations: options.pairingPskLocations,
   });
   const statusPromise = server.waitForClient();
   await core.connect();
@@ -487,6 +493,25 @@ describe("Sendspin encryption and pairing E2E (aiosendspin)", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it("advertises the configured out-channels and secret locations", async () => {
+    const connection = await connect({
+      clientName: "Descriptor hints client",
+      onPairingPin: () => undefined,
+      pinOutChannels: ["display", "speaker"],
+      staticPin: "31415926",
+      staticPinLocations: ["device", "leaflet"],
+      pairingPskLocations: ["leaflet"],
+    });
+
+    const status = await server.status(connection.core.clientId);
+    const byMethod = Object.fromEntries(
+      status.pair_method_descriptors.map((d) => [d.method, d]),
+    );
+    expect(byMethod.dynamic_pin.out_channels).toEqual(["display", "speaker"]);
+    expect(byMethod.static_pin.locations).toEqual(["device", "leaflet"]);
+    expect(byMethod.pairing_psk.locations).toEqual(["leaflet"]);
+  });
 
   it("waits for the Static PIN window before pairing", async () => {
     const pin = randomInt(0, 100_000_000).toString().padStart(8, "0");

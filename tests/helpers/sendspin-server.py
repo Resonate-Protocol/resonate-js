@@ -165,6 +165,17 @@ class HarnessServer:
             ]
             if info
             else [],
+            "pair_method_descriptors": [
+                {
+                    "method": descriptor.method.value,
+                    "out_channels": descriptor.out_channels or [],
+                    "min_pin_length": descriptor.min_pin_length,
+                    "locations": descriptor.locations or [],
+                }
+                for descriptor in (info.supported_pair_methods or [])
+            ]
+            if info
+            else [],
             "has_pairing_record": record is not None,
         }
 
