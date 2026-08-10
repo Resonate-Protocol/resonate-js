@@ -22,6 +22,7 @@ import {
   RECORRECTION_CUTOVER_GUARD_SEC,
 } from "./recorrection-monitor";
 import { OutputLatencyTracker } from "./output-latency-tracker";
+import { getUnreportedOutputLatencyMs } from "./platform-output-latency";
 import { clampSyncDelayMs } from "../sync-delay";
 
 // Sync correction constants
@@ -145,7 +146,10 @@ export class AudioScheduler {
   private _lastStatusLogMs: number = 0;
   private _intervalResyncCount: number = 0;
 
+  // Controls reported and platform fallback output latency compensation.
   private useOutputLatencyCompensation: boolean;
+  // Accounts for output delay omitted by Safari and iOS WebKit latency APIs.
+  private unreportedOutputLatencySec: number;
   private scheduleTimeout: ReturnType<typeof setTimeout> | null = null;
   private refillTimeout: ReturnType<typeof setTimeout> | null = null;
   private queueProcessScheduled = false;
@@ -180,6 +184,9 @@ export class AudioScheduler {
     this._correctionMode = options.correctionMode ?? "sync";
     this.useOutputLatencyCompensation =
       options.useOutputLatencyCompensation ?? true;
+    this.unreportedOutputLatencySec = this.useOutputLatencyCompensation
+      ? getUnreportedOutputLatencyMs() / 1000
+      : 0;
 
     // Merge user-provided threshold overrides with defaults
     this.correctionThresholds = { ...DEFAULT_CORRECTION_THRESHOLDS };
@@ -415,7 +422,9 @@ export class AudioScheduler {
       clockDriftPercent: this.timeFilter.drift * 100,
       syncErrorMs: this.currentSyncErrorMs,
       resyncCount: this.resyncCount,
-      outputLatencyMs: this.latencyTracker.getRawUs(this.audioContext) / 1000,
+      outputLatencyMs:
+        this.latencyTracker.getRawUs(this.audioContext) / 1000 +
+        this.unreportedOutputLatencySec * 1000,
       playbackRate: this.currentPlaybackRate,
       correctionMethod: this.currentCorrectionMethod,
       samplesAdjusted: this.lastSamplesAdjusted,
@@ -462,7 +471,9 @@ export class AudioScheduler {
       : `pending(n=${this.timeFilter.count})`;
 
     const smoothedLatUs = this.latencyTracker.getSmoothedUs(this.audioContext);
-    const latMs = Math.round(smoothedLatUs / 1000);
+    const latMs = Math.round(
+      smoothedLatUs / 1000 + this.unreportedOutputLatencySec * 1000,
+    );
 
     console.log(
       `Sendspin: sync=${this.smoothedSyncErrorMs >= 0 ? "+" : ""}${this.smoothedSyncErrorMs.toFixed(1)}ms` +
@@ -826,7 +837,8 @@ export class AudioScheduler {
     const outputLatencySec = this.useOutputLatencyCompensation
       ? playoutLatencySec
       : 0;
-    const syncDelaySec = this.syncDelayMs / 1000;
+    const scheduleAdvanceSec =
+      this.syncDelayMs / 1000 + this.unreportedOutputLatencySec;
     const targetScheduledHorizonSec = this.getTargetScheduledHorizonSec();
 
     if (this.usesRecorrectionMonitor) this.recorrectionMonitor.start();
@@ -872,7 +884,7 @@ export class AudioScheduler {
       if (this.nextPlaybackTime === 0 || this.lastScheduledServerTime === 0) {
         this.recorrectionMonitor.armStartupGrace(nowMs, isTimestamp);
         playbackTime = targetPlaybackTime;
-        scheduleTime = playbackTime - syncDelaySec;
+        scheduleTime = playbackTime - scheduleAdvanceSec;
         const minScheduleTimeSec = this.recorrectionMonitor.minScheduleTimeSec;
         if (minScheduleTimeSec !== null) {
           // After a cutover, drop backlog that ends at or before the kept tail
@@ -881,7 +893,7 @@ export class AudioScheduler {
             continue;
           }
           scheduleTime = Math.max(scheduleTime, minScheduleTimeSec);
-          playbackTime = scheduleTime + syncDelaySec;
+          playbackTime = scheduleTime + scheduleAdvanceSec;
         }
         this.recorrectionMonitor.clearMinScheduleTime();
         playbackRate = 1.0;
@@ -907,9 +919,9 @@ export class AudioScheduler {
             this.resyncCount++;
             this._intervalResyncCount++;
             this.resetSyncErrorEma();
-            this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
+            this.cutScheduledSources(targetPlaybackTime - scheduleAdvanceSec);
             playbackTime = targetPlaybackTime;
-            scheduleTime = playbackTime - syncDelaySec;
+            scheduleTime = playbackTime - scheduleAdvanceSec;
             playbackRate = 1.0;
             this.currentCorrectionMethod = "resync";
             this.lastSamplesAdjusted = 0;
@@ -970,10 +982,10 @@ export class AudioScheduler {
             this.recorrectionMonitor.noteHardResync(nowMs);
             this.resyncCount++;
             this._intervalResyncCount++;
-            this.cutScheduledSources(targetPlaybackTime - syncDelaySec);
+            this.cutScheduledSources(targetPlaybackTime - scheduleAdvanceSec);
           }
           playbackTime = targetPlaybackTime;
-          scheduleTime = playbackTime - syncDelaySec;
+          scheduleTime = playbackTime - scheduleAdvanceSec;
           playbackRate = 1.0;
           this.currentCorrectionMethod = "resync";
           this.lastSamplesAdjusted = 0;

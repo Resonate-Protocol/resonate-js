@@ -366,6 +366,39 @@ describe("AudioScheduler scheduling math", () => {
     );
   });
 
+  it("compensates Apple WebKit without changing the user sync delay", () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15",
+    });
+    const { scheduler, ctx } = setup({
+      useOutputLatencyCompensation: true,
+    });
+    scheduler.handleDecodedChunk(makeChunk(nowUs() + 1_000_000, 0));
+    scheduler.processAudioQueue();
+
+    expect(scheduler.getSyncDelayMs()).toBe(0);
+    expect(scheduler.syncInfo.outputLatencyMs).toBe(100);
+    expect(ctx.startedSources[0].started!).toBeCloseTo(
+      ctx.currentTime + 0.9,
+      6,
+    );
+  });
+
+  it("does not apply the WebKit correction when latency compensation is disabled", () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+    });
+    const { scheduler, ctx } = setup({
+      useOutputLatencyCompensation: false,
+    });
+    scheduler.handleDecodedChunk(makeChunk(nowUs() + 1_000_000, 0));
+    scheduler.processAudioQueue();
+
+    expect(ctx.startedSources[0].started!).toBeCloseTo(ctx.currentTime + 1, 6);
+  });
+
   it("future-timestamped chunk schedules later by the client-time delta", () => {
     const { scheduler, ctx } = setup();
     // 2 seconds in the future (server clock)
