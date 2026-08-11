@@ -717,8 +717,8 @@ export interface SendspinCoreConfig {
 
   /**
    * Channels through which this client conveys the dynamic PIN, advertised in
-   * the dynamic_pin descriptor. Default ["display"]. Servers typically only
-   * send onPairingPin a languages preference when "speaker" is advertised.
+   * the dynamic_pin descriptor. Default ["display"]. Advertise "speaker" when
+   * the app can speak the PIN, and honor the languages passed to onPairingPin.
    */
   pinOutChannels?: PairOutChannel[];
 

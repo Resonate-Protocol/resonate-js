@@ -240,11 +240,11 @@ export class PairingManager {
       (this.deps.matchedCategory() === "pairing");
     if (!method || !fitsPsk || !supported.includes(method)) {
       // A missing pairing object is answered rather than closed on, so a server
-      // still announcing the pre-9.0.0 `selected_pair_method` gets a reason it
-      // can render instead of a bare disconnect.
+      // announcing the method some other way gets a reason it can render
+      // instead of a bare disconnect.
       if (!pairing) {
         console.warn(
-          "sendspin: server/activate carried no pairing object. Pairing needs a server on the current specification (aiosendspin 9.0.0 or newer).",
+          "sendspin: server/activate carried no pairing object, so the server is not speaking the current specification.",
         );
       }
       this.abort("method_not_supported");
