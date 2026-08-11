@@ -178,12 +178,13 @@ const player = new SendspinPlayer({
   // languages carries the operator's spoken-PIN preference, when the server sends one.
   onPairingPin: (pin, languages) => showPinDialog(pin, languages),
   minPinLength: 6,            // shortest dynamic PIN this client accepts (4-12)
-  pinOutChannels: ['display'], // add "speaker" to receive `languages`
+  // Servers typically only send `languages` to clients advertising "speaker".
+  pinOutChannels: ['display'],
   // Static PIN pairing: this device's fixed 8-digit PIN.
   staticPin: '31415926',
-  // Where the operator finds each secret. Any combination of device | leaflet | operator.
+  // Where the operator finds each secret, if you know. Any combination of
+  // device | leaflet | operator. Omitted from client/hello when unset.
   staticPinLocations: ['device', 'leaflet'],
-  pairingPskLocations: ['device'],
 });
 
 await player.connect();
@@ -221,7 +222,12 @@ player.cancelPairing();                          // abort an in-progress attempt
 player.isDynamicPinEscalated();                  // gesture-gated after 10 failures
 ```
 
-`player.pairingToken` is the version 0 token defined by the current specification. Music Assistant installations using aiosendspin 7.0.0 do not accept the current token format; use PIN pairing until the backend supports version 0.
+Pairing requires a server speaking the current specification, which means
+aiosendspin 9.0.0 or newer. Older servers announce the pairing method in a
+field this SDK no longer reads, so every pairing method (including PIN pairing)
+aborts with `method_not_supported` against them.
+
+`player.pairingToken` is the version 0 token defined by the current specification.
 Identity and pairing require `storage` (defaults to `localStorage`); without
 it, `clientId` is still generated per session but `pairingPsk`,
 `pairingToken`, and `rotatePairingPsk()` return `null`.

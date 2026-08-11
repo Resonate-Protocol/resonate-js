@@ -160,6 +160,15 @@ describe("PairingManager (pairing_psk)", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it("ignores a pairing object on a non-pairing activation", () => {
+    const { sent, close, mgr } = setup();
+    // Spec: "A client ignores this field when activities does not include
+    // 'pairing'". No abort, no close, and no attempt started.
+    expect(mgr.onActivate(["playback"], { method: "pairing_psk" })).toBe(false);
+    expect(sent).toEqual([]);
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("aborts a pairing activation with no pairing object", () => {
     const { sent, close, mgr } = setup();
     mgr.onActivate(["pairing"]);
@@ -194,12 +203,18 @@ describe("PairingManager (pairing_psk)", () => {
     expect(events).not.toContain("aborted");
   });
 
-  it("ignores a duplicate pairing activate and mints only one PSK", () => {
-    const { sent, mgr } = setup();
+  it("supersedes a running attempt when another pairing activate arrives", () => {
+    const { sent, events, mgr } = setup();
     expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
     expect(mgr.onActivate(["pairing"], { method: "pairing_psk" })).toBe(true);
+    // The first attempt is abandoned and the second mints its own PSK, so the
+    // client's activate count keeps pace with the server's.
     const finalizes = sent.filter((m) => m.type === "client/pair-finalize");
-    expect(finalizes).toHaveLength(1);
+    expect(finalizes).toHaveLength(2);
+    expect(finalizes[0]!.payload!.long_term_psk).not.toBe(
+      finalizes[1]!.payload!.long_term_psk,
+    );
+    expect(events).toEqual(["started", "aborted", "started"]);
   });
 
   it("discards the pending PSK on leave-pairing (non-pairing activate)", () => {
@@ -215,11 +230,11 @@ describe("PairingManager (pairing_psk)", () => {
 });
 
 describe("client/hello descriptors", () => {
-  it("advertises only pairing_psk by default, located on the device", () => {
+  it("advertises only pairing_psk by default, with no locations hint", () => {
     const { mgr } = setup({ onPin: null });
-    expect(mgr.descriptors()).toEqual([
-      { method: "pairing_psk", locations: ["device"] },
-    ]);
+    // The hint says where the operator finds the secret, which only the
+    // integrator knows, so an unconfigured client claims nothing.
+    expect(mgr.descriptors()).toEqual([{ method: "pairing_psk" }]);
   });
 
   it("advertises dynamic_pin with out_channels and min_pin_length when onPin is set", () => {
@@ -240,12 +255,18 @@ describe("client/hello descriptors", () => {
     expect(dyn.out_channels).toEqual(["display", "speaker"]);
   });
 
-  it("advertises static_pin as operator-set when a PIN is configured", () => {
+  it("advertises static_pin without a locations hint when unconfigured", () => {
     const { mgr } = setup({ onPin: null, staticPin: "12345678" });
-    expect(mgr.descriptors()).toContainEqual({
-      method: "static_pin",
-      locations: ["operator"],
+    expect(mgr.descriptors()).toContainEqual({ method: "static_pin" });
+  });
+
+  it("omits an empty locations list rather than advertising it", () => {
+    const { mgr } = setup({
+      onPin: null,
+      staticPin: "12345678",
+      staticPinLocations: [],
     });
+    expect(mgr.descriptors()).toContainEqual({ method: "static_pin" });
   });
 
   it("advertises the configured secret locations", () => {
@@ -291,8 +312,9 @@ describe("PairingManager (dynamic_pin)", () => {
   /** Drive one dynamic-PIN attempt through to a mismatched server tag. */
   function failAttempt(ctx: ReturnType<typeof setup>, index: number): void {
     ctx.mgr.onActivate(["pairing"], dynamic(PIN_LENGTH));
-    // Once escalated, every attempt waits on a gesture.
-    if (!lastOfType(ctx.sent, "client/pair-init")) ctx.mgr.openPairingWindow();
+    // Once escalated, this attempt waits on a gesture instead of starting.
+    const pending = lastOfType(ctx.sent, "client/pair-pending");
+    if (pending?.payload!.pairing_index === index) ctx.mgr.openPairingWindow();
     ctx.mgr.onPairInit({
       nonce_A: base64urlEncode(new Uint8Array(32).fill(0xa1)),
     });
@@ -369,6 +391,26 @@ describe("PairingManager (dynamic_pin)", () => {
       (c) => typeof c[0] === "string",
     )!;
     expect(call[1]).toEqual(["ca", "es", "en"]);
+  });
+
+  it.each([
+    ["not an array", "en" as unknown],
+    ["an empty list", []],
+    ["non-string members", ["en", 7]],
+    ["a blank tag", ["en", ""]],
+  ])("drops a languages hint that is %s", (_label, languages) => {
+    const ctx = runToConfirm({}, {
+      method: "dynamic_pin",
+      pin_length: PIN_LENGTH,
+      languages,
+    } as ActivatePairing);
+    const call = (ctx.onPin as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => typeof c[0] === "string",
+    )!;
+    // Informational only: a malformed hint is never grounds for pair/abort.
+    expect(call[1]).toBeUndefined();
+    expect(lastOfType(ctx.sent, "pair/abort")).toBeUndefined();
+    expect(ctx.close).not.toHaveBeenCalled();
   });
 
   it("omits languages when the activation carries none", () => {
@@ -649,6 +691,32 @@ describe("PairingManager (static_pin)", () => {
     expect(ctx.store.lookup(pskId(ltPsk))?.serverId).toBe("SERVER_ID");
   });
 
+  it("reports an abandoned gesture-gated attempt so the app can drop its prompt", () => {
+    const ctx = staticSetup();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    expect(ctx.events).toEqual(["pending"]);
+    // The server may leave pairing without first sending pair/abort, which is
+    // only a SHOULD, so the client has to surface the end of the attempt itself.
+    ctx.mgr.onActivate(["playback"]);
+    expect(ctx.events).toEqual(["pending", "aborted"]);
+    expect(ctx.details.at(-1)).toBe("server_cancelled");
+  });
+
+  it("supersedes a gesture-gated attempt and re-signals under the new index", () => {
+    const ctx = staticSetup();
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
+    // Without counting the second activate the eventual pair-init would carry a
+    // stale index, which the server discards silently and pairing wedges.
+    expect(lastOfType(ctx.sent, "client/pair-pending")!.payload).toEqual({
+      pairing_index: 2,
+    });
+    ctx.mgr.openPairingWindow();
+    expect(lastOfType(ctx.sent, "client/pair-init")!.payload).toEqual({
+      pairing_index: 2,
+    });
+  });
+
   it("starts immediately, with no pair-pending, when the window was already open", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
@@ -693,12 +761,15 @@ describe("PairingManager (static_pin)", () => {
     expect(inits).toHaveLength(1);
   });
 
-  it("reset closes a pre-opened pairing window", () => {
+  it("reset preserves a pre-opened pairing window", () => {
     const ctx = staticSetup();
     ctx.mgr.openPairingWindow();
+    // The window is device state: the spec closes it only on a drop of the
+    // connection carrying its attempt, and no attempt is in flight here.
     ctx.mgr.reset();
     ctx.mgr.onActivate(["pairing"], { method: "static_pin" });
-    expect(lastOfType(ctx.sent, "client/pair-init")).toBeUndefined();
+    expect(lastOfType(ctx.sent, "client/pair-pending")).toBeUndefined();
+    expect(lastOfType(ctx.sent, "client/pair-init")).toBeDefined();
   });
 });
 

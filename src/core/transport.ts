@@ -295,7 +295,6 @@ export class SendspinTransport {
           payload: {
             activities: ("playback" | "pairing" | "management")[];
             active_roles?: string[];
-            pairing?: { method?: string };
           };
         },
       );
@@ -351,7 +350,6 @@ export class SendspinTransport {
     payload: {
       activities: ("playback" | "pairing" | "management")[];
       active_roles?: string[];
-      pairing?: { method?: string };
     };
   }): void {
     const payloadRoles = msg.payload.active_roles;

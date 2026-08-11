@@ -56,6 +56,22 @@ const FAILURES_STORAGE_KEY = "sendspin-pair-failures";
 
 const PIN_METHODS: readonly PairMethod[] = ["dynamic_pin", "static_pin"];
 
+/** Only advertise a locations hint the integrator actually configured. */
+function withLocations(
+  descriptor: PairMethodDescriptor,
+  locations?: PairSecretLocation[],
+): PairMethodDescriptor {
+  return locations?.length ? { ...descriptor, locations } : descriptor;
+}
+
+/** A languages hint that is not a non-empty list of tags is treated as absent. */
+function readLanguages(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  return value.every((tag) => typeof tag === "string" && tag !== "")
+    ? (value as string[])
+    : undefined;
+}
+
 type Phase =
   | "idle"
   /** Gesture-gated: client/pair-pending sent, waiting for the operator's gesture. */
@@ -144,16 +160,12 @@ export class PairingManager {
   /** The pairing-method descriptors to advertise in client/hello. */
   descriptors(): PairMethodDescriptor[] {
     const out: PairMethodDescriptor[] = [
-      {
-        method: "pairing_psk",
-        locations: this.deps.pairingPskLocations ?? ["device"],
-      },
+      withLocations({ method: "pairing_psk" }, this.deps.pairingPskLocations),
     ];
     if (this.deps.staticPin !== undefined) {
-      out.push({
-        method: "static_pin",
-        locations: this.deps.staticPinLocations ?? ["operator"],
-      });
+      out.push(
+        withLocations({ method: "static_pin" }, this.deps.staticPinLocations),
+      );
     }
     if (this.deps.onPin) {
       out.push({
@@ -186,10 +198,18 @@ export class PairingManager {
     }
     this.windowOpen = true;
     if (this.windowTimer) clearTimeout(this.windowTimer);
-    this.windowTimer = setTimeout(() => {
-      this.windowOpen = false; // window expires silently
-      this.windowTimer = null;
-    }, WINDOW_LIFETIME_MS);
+    this.windowTimer = setTimeout(() => this.closeWindow(), WINDOW_LIFETIME_MS);
+  }
+
+  /**
+   * Close the pairing window. The window is device state, not connection
+   * state: it survives handshakes and drops until an attempt consumes it or
+   * its lifetime runs out.
+   */
+  private closeWindow(): void {
+    this.windowOpen = false;
+    if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowTimer = null;
   }
 
   /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
@@ -202,13 +222,13 @@ export class PairingManager {
   onActivate(activities: string[], pairing?: ActivatePairing): boolean {
     const isPairing = activities.includes("pairing");
     if (!isPairing) {
-      // Non-pairing activate in place of pair-finalize = leave-pairing: discard
-      // the attempt. With no attempt in progress, preserve a pre-opened
-      // window so a later pairing activate can still use it.
-      if (this.phase !== "idle" || this.pendingPsk) this.clearAttempt();
+      // Non-pairing activate in place of pair-finalize = leave-pairing.
+      this.abandonAttempt("server_cancelled");
       return false;
     }
-    if (this.phase !== "idle" || this.pendingPsk) return true; // attempt already running
+    // A pairing activate arriving mid-attempt supersedes it: the server has
+    // moved on, and any message still carrying the old index is discarded.
+    this.abandonAttempt("superseded");
     // Each pairing activate is one attempt, indexed for pairing_index and sid.
     this.pairingActivateCount += 1;
     this.attemptIndex = this.pairingActivateCount;
@@ -219,6 +239,14 @@ export class PairingManager {
       (method === "pairing_psk") ===
       (this.deps.matchedCategory() === "pairing");
     if (!method || !fitsPsk || !supported.includes(method)) {
+      // A missing pairing object is answered rather than closed on, so a server
+      // still announcing the pre-9.0.0 `selected_pair_method` gets a reason it
+      // can render instead of a bare disconnect.
+      if (!pairing) {
+        console.warn(
+          "sendspin: server/activate carried no pairing object. Pairing needs a server on the current specification (aiosendspin 9.0.0 or newer).",
+        );
+      }
       this.abort("method_not_supported");
       return true;
     }
@@ -245,7 +273,7 @@ export class PairingManager {
         return true;
       }
       this.pinLength = length;
-      this.languages = pairing.languages;
+      this.languages = readLanguages(pairing.languages);
     }
     if (this.isGestureGated() && !this.windowOpen) {
       this.phase = "await-window";
@@ -363,13 +391,10 @@ export class PairingManager {
     this.attemptIndex = 0;
   }
 
-  /** Send client/pair-init, consuming the window when one gated the attempt. */
+  /** Send client/pair-init. The window's lifetime ends here (spec: it runs
+   * from the gesture until client/pair-init is sent). */
   private startAttempt(): void {
-    this.windowOpen = false; // the window admits exactly one attempt
-    if (this.windowTimer) {
-      clearTimeout(this.windowTimer);
-      this.windowTimer = null;
-    }
+    this.closeWindow();
     this.armAttemptTimer();
     this.deps.onEvent?.("started");
     if (this.method === "dynamic_pin") {
@@ -464,9 +489,7 @@ export class PairingManager {
 
   private clearAttempt(): void {
     if (this.attemptTimer) clearTimeout(this.attemptTimer);
-    if (this.windowTimer) clearTimeout(this.windowTimer);
     this.attemptTimer = null;
-    this.windowTimer = null;
     if (this.method && PIN_METHODS.includes(this.method)) {
       this.deps.onPin?.(null);
     }
@@ -478,7 +501,17 @@ export class PairingManager {
     this.nonceB = null;
     this.pinLength = null;
     this.languages = undefined;
-    this.windowOpen = false;
+  }
+
+  /**
+   * End an attempt the server walked away from, without sending pair/abort.
+   * The event lets the app drop any "waiting for gesture" UI, which a silent
+   * cancel would otherwise leave up (the server's pair/abort is only a SHOULD).
+   */
+  private abandonAttempt(detail: string): void {
+    if (this.phase === "idle" && !this.pendingPsk) return;
+    this.clearAttempt();
+    this.deps.onEvent?.("aborted", detail);
   }
 
   private decode(value: string | undefined, size: number): Uint8Array | null {

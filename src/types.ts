@@ -717,8 +717,8 @@ export interface SendspinCoreConfig {
 
   /**
    * Channels through which this client conveys the dynamic PIN, advertised in
-   * the dynamic_pin descriptor. Default ["display"]. Include "speaker" to have
-   * servers send their operator's language preferences to onPairingPin.
+   * the dynamic_pin descriptor. Default ["display"]. Servers typically only
+   * send onPairingPin a languages preference when "speaker" is advertised.
    */
   pinOutChannels?: PairOutChannel[];
 
@@ -738,10 +738,10 @@ export interface SendspinCoreConfig {
    */
   staticPin?: string;
 
-  /** Where the operator finds the static PIN. Default ["operator"]. */
+  /** Where the operator finds the static PIN. Omitted when unset. */
   staticPinLocations?: PairSecretLocation[];
 
-  /** Where the operator finds the Pairing PSK. Default ["device"]. */
+  /** Where the operator finds the Pairing PSK. Omitted when unset. */
   pairingPskLocations?: PairSecretLocation[];
 
   /** Callback when player state changes (local or from server). */
