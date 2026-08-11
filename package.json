@@ -20,6 +20,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "dev-server": "rm -rf public/dev && concurrently \"tsc --watch\" \"rollup -c --watch\" \"serve . -l 6001\"",
+    "pretest": "node scripts/bundle-silent-audio.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . --fix --ignore-path .gitignore",
