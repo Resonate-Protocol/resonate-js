@@ -295,7 +295,6 @@ export class SendspinTransport {
           payload: {
             activities: ("playback" | "pairing" | "management")[];
             active_roles?: string[];
-            selected_pair_method?: string;
           };
         },
       );
@@ -351,7 +350,6 @@ export class SendspinTransport {
     payload: {
       activities: ("playback" | "pairing" | "management")[];
       active_roles?: string[];
-      selected_pair_method?: string;
     };
   }): void {
     const payloadRoles = msg.payload.active_roles;
@@ -368,7 +366,6 @@ export class SendspinTransport {
       msg.payload.activities,
       this.effectiveActiveRoles,
       this.deps.unpairedAccess,
-      msg.payload.selected_pair_method,
     );
     if (!result.ok) {
       this.sendGoodbyeAndClose(result.goodbye);

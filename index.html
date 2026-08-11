@@ -349,13 +349,24 @@
               server.</small
             >
           </div>
+          <div class="form-group" id="pairing-pending-group" hidden>
+            <label>Gesture required</label>
+            <span id="pairing-pending" class="status-value"
+              >Open the pairing window to continue.</span
+            >
+            <small
+              >The server is waiting on the operator gesture. Static PIN needs
+              one every attempt; dynamic PIN only when escalated or the PIN is
+              shorter than 6 digits.</small
+            >
+          </div>
           <div class="form-group" id="pairing-pin-group" hidden>
             <label>Pairing PIN</label>
             <code id="pairing-pin" class="pairing-value">-</code>
             <button id="cancel-pairing" class="btn btn-secondary">
               Cancel pairing
             </button>
-            <small
+            <small id="pairing-pin-hint"
               >Enter this PIN into the server to complete pairing.</small
             >
           </div>
@@ -373,19 +384,65 @@
             </button>
             <small
               >Optional fixed device PIN; enables static-PIN pairing on the
-              next connect. Open the window (~5 min) before each
+              next connect. Open the window (~5 min) before each gesture-gated
               attempt.</small
             >
           </div>
-          <div class="form-group">
-            <label>PIN lockout</label>
-            <span id="pin-lockout" class="status-value">-</span>
-            <button id="clear-lockout" class="btn btn-secondary">
-              Clear lockout
-            </button>
+          <div class="form-group" id="static-pin-locations">
+            <label>Static PIN locations</label>
+            <label>
+              <input type="checkbox" value="device" />
+              Printed on the device
+            </label>
+            <label>
+              <input type="checkbox" value="leaflet" />
+              On a leaflet in the box
+            </label>
+            <label>
+              <input type="checkbox" value="operator" checked />
+              Set by the operator
+            </label>
             <small
-              >A PIN method locks out after 10 failed attempts. Clearing it is
-              a deliberate local action.</small
+              >Hint telling the server where to point the operator. Pick any
+              combination, or none to omit the hint. Applied on connect.</small
+            >
+          </div>
+          <div class="form-group" id="pairing-psk-locations">
+            <label>Pairing PSK locations</label>
+            <label>
+              <input type="checkbox" value="device" />
+              Printed on the device
+            </label>
+            <label>
+              <input type="checkbox" value="leaflet" />
+              On a leaflet in the box
+            </label>
+            <label>
+              <input type="checkbox" value="operator" />
+              Set by the operator
+            </label>
+            <small
+              >Same hint for the Pairing PSK. This player generates its token at
+              runtime and shows it above, so none of these is true by
+              default.</small
+            >
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="pin-speaker" />
+              Speak the dynamic PIN
+            </label>
+            <small
+              >Advertises the "speaker" out-channel and reads the PIN aloud in
+              the server's preferred language.</small
+            >
+          </div>
+          <div class="form-group">
+            <label>Dynamic PIN escalated</label>
+            <span id="pin-escalated" class="status-value">-</span>
+            <small
+              >After 10 failed attempts every dynamic-PIN attempt needs a
+              gesture, until one succeeds.</small
             >
           </div>
           <div class="form-group">

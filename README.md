@@ -170,14 +170,21 @@ const player = new SendspinPlayer({
     { psk: 'base64url-psk', serverId: 'optional-server-id' },
   ],
   onPairing: (event, detail) => {
-    // event: "started" | "finalized" | "aborted"
+    // event: "pending" | "started" | "finalized" | "aborted"
+    // "pending" means the attempt is waiting for openPairingWindow().
     console.log('Pairing:', event, detail);
   },
   // Dynamic PIN pairing: show the derived PIN to the operator (null = hide).
-  onPairingPin: (pin) => showPinDialog(pin),
+  // languages carries the operator's spoken-PIN preference, when the server sends one.
+  onPairingPin: (pin, languages) => showPinDialog(pin, languages),
   minPinLength: 6,            // shortest dynamic PIN this client accepts (4-12)
+  // Advertise "speaker" if the app can speak the PIN; `languages` says which language to use.
+  pinOutChannels: ['display'],
   // Static PIN pairing: this device's fixed 8-digit PIN.
   staticPin: '31415926',
+  // Where the operator finds each secret, if you know. Any combination of
+  // device | leaflet | operator. Omitted from client/hello when unset.
+  staticPinLocations: ['device', 'leaflet'],
 });
 
 await player.connect();
@@ -196,6 +203,13 @@ The SDK supports all three pairing methods from the spec:
   fixed 8-digit PIN into the server, then makes a local gesture that calls
   `player.openPairingWindow()` (window lasts ~5 minutes, one attempt).
 
+Some attempts are **gesture-gated**: the SDK withholds `client/pair-init` until
+`openPairingWindow()` is called, signalling `client/pair-pending` meanwhile and
+firing `onPairing("pending")`. That applies to every static PIN attempt, and to
+dynamic PIN when the method has escalated or the server picked a PIN shorter
+than 6 digits. Ten consecutive dynamic-PIN failures escalate the method, and any
+later success de-escalates it.
+
 ```typescript
 console.log('Client ID:', player.clientId);              // 43-char base64url pubkey
 console.log('Pairing token:', player.pairingToken);      // spec version 0, or null without storage
@@ -203,13 +217,17 @@ console.log('Pairing token:', player.pairingToken);      // spec version 0, or n
 // Rotate the Pairing PSK (e.g. if it may have leaked)
 const newPsk = player.rotatePairingPsk();
 
-player.openPairingWindow();                      // static PIN: operator gesture
+player.openPairingWindow();                      // operator gesture for a gated attempt
 player.cancelPairing();                          // abort an in-progress attempt
-player.isPairingLockedOut('dynamic_pin');        // terminal lockout after 10 failures
-player.clearPairingLockout('dynamic_pin');       // local operator action that exits lockout
+player.isDynamicPinEscalated();                  // gesture-gated after 10 failures
 ```
 
-`player.pairingToken` is the version 0 token defined by the current specification. Music Assistant installations using aiosendspin 7.0.0 do not accept the current token format; use PIN pairing until the backend supports version 0.
+Pairing requires a server speaking the current specification. A non-compliant
+server announces the pairing method in a field this SDK no longer reads, so the
+activation arrives without one and the client closes the connection as a
+protocol error, logging the reason to the console.
+
+`player.pairingToken` is the version 0 token defined by the current specification.
 Identity and pairing require `storage` (defaults to `localStorage`); without
 it, `clientId` is still generated per session but `pairingPsk`,
 `pairingToken`, and `rotatePairingPsk()` return `null`.

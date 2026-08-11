@@ -12,7 +12,7 @@ const concat = (a: Uint8Array, b: Uint8Array) => {
 type ActivatePayload = {
   activities: string[];
   active_roles?: string[];
-  selected_pair_method?: string;
+  pairing?: { method: string };
 };
 
 function activate(

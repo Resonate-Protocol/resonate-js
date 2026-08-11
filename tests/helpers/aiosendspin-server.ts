@@ -11,6 +11,14 @@ const STATE_PREFIX = join(tmpdir(), "sendspin-js-aiosendspin-");
 export type PskCategory = "sentinel" | "pairing" | "long_term";
 export type PairMethod = "dynamic_pin" | "pairing_psk" | "static_pin";
 
+/** A client/hello pair-method descriptor as the server parsed it. */
+export interface PairMethodDescriptor {
+  method: PairMethod;
+  out_channels: string[];
+  min_pin_length: number | null;
+  locations: string[];
+}
+
 export interface ClientStatus {
   client_id: string | null;
   connected: boolean;
@@ -18,6 +26,7 @@ export interface ClientStatus {
   trust_level: "none" | "user" | null;
   active_roles: string[];
   supported_pair_methods: PairMethod[];
+  pair_method_descriptors: PairMethodDescriptor[];
   has_pairing_record: boolean;
 }
 

@@ -24,11 +24,11 @@ import { getSupportedFormats } from "./codec-support";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import { encodePairingToken } from "./noise/pairing-token";
 import type {
+  ActivatePairing,
   SendspinCoreConfig,
   DecodedAudioChunk,
   StreamFormat,
   GoodbyeReason,
-  PairMethod,
   PlayerState,
   ControllerCommand,
   ControllerCommands,
@@ -142,8 +142,11 @@ export class SendspinCore implements StreamHandler {
         ),
       storage: config.storage ?? null,
       onPin: config.onPairingPin ?? null,
+      pinOutChannels: config.pinOutChannels,
       minPinLength: config.minPinLength,
       staticPin: config.staticPin,
+      staticPinLocations: config.staticPinLocations,
+      pairingPskLocations: config.pairingPskLocations,
       onEvent: (e, d) => this.config.onPairing?.(e, d),
     });
 
@@ -180,21 +183,18 @@ export class SendspinCore implements StreamHandler {
     if (msg.type === "server/activate") {
       const p = (msg.payload ?? {}) as {
         activities?: string[];
-        selected_pair_method?: string;
+        pairing?: ActivatePairing;
       };
       if (p.activities?.includes("pairing")) {
         this.protocolHandler.suspendForPairing();
       }
-      const consumed = this.pairing.onActivate(
-        p.activities ?? [],
-        p.selected_pair_method,
-      );
+      const consumed = this.pairing.onActivate(p.activities ?? [], p.pairing);
       if (!consumed) this.protocolHandler.handleServerMessage(msg as never);
       return;
     }
     if (msg.type === "server/pair-init") {
       return this.pairing.onPairInit(
-        (msg.payload ?? {}) as { nonce_A?: string; pin_length?: number },
+        (msg.payload ?? {}) as { nonce_A?: string },
       );
     }
     if (msg.type === "server/pair-auth") {
@@ -495,8 +495,9 @@ export class SendspinCore implements StreamHandler {
   }
 
   /**
-   * Operator gesture that opens the static-PIN pairing window (~5 minutes,
-   * admits one attempt). Required before each static PIN pairing attempt.
+   * Operator gesture that opens the pairing window (~5 minutes, admits one
+   * attempt). Required before each gesture-gated attempt: every static PIN
+   * attempt, and dynamic PIN when escalated or the PIN is shorter than 6.
    */
   openPairingWindow(): void {
     this.pairing.openPairingWindow();
@@ -507,14 +508,9 @@ export class SendspinCore implements StreamHandler {
     this.pairing.cancelPairing();
   }
 
-  /** Whether a PIN pairing method is in terminal lockout (10 failures). */
-  isPairingLockedOut(method: PairMethod): boolean {
-    return this.pairing.isLockedOut(method);
-  }
-
-  /** Local operator action that exits terminal lockout for a PIN method. */
-  clearPairingLockout(method: PairMethod): void {
-    this.pairing.clearLockout(method);
+  /** Whether dynamic PIN has escalated to gesture-gating (10 failures). */
+  isDynamicPinEscalated(): boolean {
+    return this.pairing.isDynamicPinEscalated();
   }
 
   get timeSyncInfo(): { synced: boolean; offset: number; error: number } {

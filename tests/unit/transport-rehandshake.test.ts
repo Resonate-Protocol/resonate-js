@@ -67,7 +67,7 @@ function deliverActivate(
   session: NoiseSession,
   activities: string[],
   activeRoles: string[],
-  selectedPairMethod?: string,
+  pairMethod?: string,
 ): void {
   const frame = concat(
     Uint8Array.of(0),
@@ -77,7 +77,7 @@ function deliverActivate(
         payload: {
           activities,
           active_roles: activeRoles,
-          selected_pair_method: selectedPairMethod,
+          pairing: pairMethod ? { method: pairMethod } : undefined,
         },
       }),
     ),

@@ -1,9 +1,12 @@
 import type { PskStore, PskCategory } from "./noise/psk";
 import { base64urlEncode, base64urlDecode } from "./noise/base64url";
 import type {
+  ActivatePairing,
   PairAbortReason,
   PairMethod,
   PairMethodDescriptor,
+  PairOutChannel,
+  PairSecretLocation,
   SendspinStorage,
 } from "../types";
 import { CPace, CPaceError, SHARE_SIZE, TAG_SIZE } from "./pake/cpace";
@@ -19,7 +22,7 @@ import {
 } from "./pake/pin";
 import { sha256 } from "@noble/hashes/sha2";
 
-export type PairingEvent = "started" | "finalized" | "aborted";
+export type PairingEvent = "pending" | "started" | "finalized" | "aborted";
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 
@@ -42,18 +45,36 @@ const CPACE_AD_A = utf8("server");
 const CPACE_AD_B = utf8("client");
 /** A PIN pairing attempt must complete within this bound (spec: 2 minutes). */
 const ATTEMPT_TIMEOUT_MS = 120_000;
-/** Static-PIN pairing window lifetime after the operator gesture (spec: ~5 minutes). */
+/** Lifetime of an open pairing window, from the gesture until client/pair-init. */
 const WINDOW_LIFETIME_MS = 300_000;
-/** A PIN method enters terminal lockout at this many consecutive failures. */
-const PIN_LOCKOUT_THRESHOLD = 10;
-/** Persisted per-method PIN failure counters (not partitioned by server). */
+/** Dynamic PIN escalates to gesture-gating at this many consecutive failures. */
+const ESCALATION_THRESHOLD = 10;
+/** Dynamic PIN below this length is gesture-gated: short PINs are bought with a gesture. */
+const SHORT_PIN_LENGTH = 6;
+/** Persisted PIN failure counter (dynamic PIN only, not partitioned by server). */
 const FAILURES_STORAGE_KEY = "sendspin-pair-failures";
 
 const PIN_METHODS: readonly PairMethod[] = ["dynamic_pin", "static_pin"];
 
+/** Only advertise a locations hint the integrator actually configured. */
+function withLocations(
+  descriptor: PairMethodDescriptor,
+  locations?: PairSecretLocation[],
+): PairMethodDescriptor {
+  return locations?.length ? { ...descriptor, locations } : descriptor;
+}
+
+/** A languages hint that is not a non-empty list of tags is treated as absent. */
+function readLanguages(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  return value.every((tag) => typeof tag === "string" && tag !== "")
+    ? (value as string[])
+    : undefined;
+}
+
 type Phase =
   | "idle"
-  /** Static PIN: pairing selected, waiting for the operator's window gesture. */
+  /** Gesture-gated: client/pair-pending sent, waiting for the operator's gesture. */
   | "await-window"
   /** Dynamic PIN: client/pair-init sent, awaiting server/pair-init. */
   | "await-init"
@@ -78,14 +99,20 @@ export interface PairingDeps {
    * key is K_wrap. Returns the 48-byte wrapped PSK.
    */
   aeadSeal(key: Uint8Array, plaintext: Uint8Array): Uint8Array;
-  /** Persists PIN-method failure counters. Null = in-memory only. */
+  /** Persists the dynamic-PIN failure counter. Null = in-memory only. */
   storage: SendspinStorage | null;
   /** Enables dynamic_pin: surfaces the PIN (null = attempt ended, hide it). */
-  onPin: ((pin: string | null) => void) | null;
+  onPin: ((pin: string | null, languages?: string[]) => void) | null;
+  /** Channels advertised for dynamic PIN emission. Default ["display"]. */
+  pinOutChannels?: PairOutChannel[];
   /** Shortest dynamic PIN length this client accepts. */
   minPinLength?: number;
   /** Enables static_pin: this device's fixed 8-digit PIN. */
   staticPin?: string;
+  /** Where the operator finds the static PIN. Omitted when unset. */
+  staticPinLocations?: PairSecretLocation[];
+  /** Where the operator finds the Pairing PSK. Omitted when unset. */
+  pairingPskLocations?: PairSecretLocation[];
   onEvent?(e: PairingEvent, detail?: string): void;
 }
 
@@ -105,7 +132,11 @@ export class PairingManager {
   private pairingActivateCount = 0;
   /** The counter for the current attempt (pairing_index and CPace sid counter). */
   private attemptIndex = 0;
-  private failures: Partial<Record<PairMethod, number>>;
+  /** The dynamic PIN length for the current attempt, from the activation. */
+  private pinLength: number | null = null;
+  /** The activation's spoken-PIN language preferences, in descending order. */
+  private languages: string[] | undefined;
+  private failures: number;
   private readonly minPinLength: number;
 
   constructor(private deps: PairingDeps) {
@@ -116,11 +147,11 @@ export class PairingManager {
       MAX_PIN_DIGITS,
       Math.max(MIN_PIN_DIGITS, deps.minPinLength ?? DEFAULT_MIN_PIN_DIGITS),
     );
-    if (!deps.storage && (deps.staticPin !== undefined || deps.onPin)) {
-      // Spec requires the lockout counter to survive reboots. Without storage
-      // it is in-memory only and brute-force lockout resets on restart.
+    if (!deps.storage && deps.onPin) {
+      // Spec requires the failure counter to survive reboots. Without storage
+      // it is in-memory only and escalation resets on restart.
       console.warn(
-        "sendspin: PIN pairing is enabled without storage, so the lockout counter will not persist across reboots.",
+        "sendspin: dynamic PIN pairing is enabled without storage, so the failure counter will not persist across reboots.",
       );
     }
     this.failures = this.loadFailures();
@@ -128,53 +159,57 @@ export class PairingManager {
 
   /** The pairing-method descriptors to advertise in client/hello. */
   descriptors(): PairMethodDescriptor[] {
-    const out: PairMethodDescriptor[] = [{ method: "pairing_psk" }];
+    const out: PairMethodDescriptor[] = [
+      withLocations({ method: "pairing_psk" }, this.deps.pairingPskLocations),
+    ];
     if (this.deps.staticPin !== undefined) {
-      out.push({
-        method: "static_pin",
-        locked_out: this.isLockedOut("static_pin"),
-      });
+      out.push(
+        withLocations({ method: "static_pin" }, this.deps.staticPinLocations),
+      );
     }
     if (this.deps.onPin) {
       out.push({
         method: "dynamic_pin",
-        out_channels: ["display"],
+        out_channels: this.deps.pinOutChannels ?? ["display"],
         min_pin_length: this.minPinLength,
-        locked_out: this.isLockedOut("dynamic_pin"),
       });
     }
     return out;
   }
 
-  /** Whether a PIN method is in terminal lockout (spec: 10 failures). */
-  isLockedOut(method: PairMethod): boolean {
-    return (this.failures[method] ?? 0) >= PIN_LOCKOUT_THRESHOLD;
-  }
-
   /**
-   * Local operator action that exits terminal lockout for a PIN method,
-   * resetting its failure counter (spec: deliberate local action).
+   * Whether dynamic PIN has escalated to gesture-gating (spec: 10 failures).
+   * Escalation is not an error state: the method stays offered, and every
+   * attempt needs openPairingWindow() until a successful round de-escalates it.
    */
-  clearLockout(method: PairMethod): void {
-    this.resetFailures(method);
+  isDynamicPinEscalated(): boolean {
+    return this.failures >= ESCALATION_THRESHOLD;
   }
 
   /**
-   * Operator gesture that opens the static-PIN pairing window. If the server
-   * already selected static_pin, the attempt starts immediately, otherwise the
-   * window admits one attempt within its lifetime (~5 minutes).
+   * Operator gesture that opens the pairing window. If an attempt is already
+   * waiting on it the attempt starts immediately, otherwise the window admits
+   * one attempt within its lifetime (~5 minutes).
    */
   openPairingWindow(): void {
     if (this.phase === "await-window") {
-      this.startStaticAttempt();
+      this.startAttempt();
       return;
     }
     this.windowOpen = true;
     if (this.windowTimer) clearTimeout(this.windowTimer);
-    this.windowTimer = setTimeout(() => {
-      this.windowOpen = false; // window expires silently
-      this.windowTimer = null;
-    }, WINDOW_LIFETIME_MS);
+    this.windowTimer = setTimeout(() => this.closeWindow(), WINDOW_LIFETIME_MS);
+  }
+
+  /**
+   * Close the pairing window. The window is device state, not connection
+   * state: it survives handshakes and drops until an attempt consumes it or
+   * its lifetime runs out.
+   */
+  private closeWindow(): void {
+    this.windowOpen = false;
+    if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowTimer = null;
   }
 
   /** Cancel an in-progress pairing attempt (sends pair/abort user_cancelled). */
@@ -184,31 +219,39 @@ export class PairingManager {
   }
 
   /** Called for every server/activate. Returns true if it consumed a pairing activation. */
-  onActivate(activities: string[], selectedPairMethod?: string): boolean {
+  onActivate(activities: string[], pairing?: ActivatePairing): boolean {
     const isPairing = activities.includes("pairing");
     if (!isPairing) {
-      // Non-pairing activate in place of pair-finalize = leave-pairing: discard
-      // the attempt. With no attempt in progress, preserve a pre-opened
-      // static-PIN window so a later static_pin activate can still use it.
-      if (this.phase !== "idle" || this.pendingPsk) this.clearAttempt();
+      // Non-pairing activate in place of pair-finalize = leave-pairing.
+      this.abandonAttempt("server_cancelled");
       return false;
     }
-    if (this.phase !== "idle" || this.pendingPsk) return true; // attempt already running
+    // A pairing activate arriving mid-attempt supersedes it: the server has
+    // moved on, and any message still carrying the old index is discarded.
+    this.abandonAttempt("superseded");
     // Each pairing activate is one attempt, indexed for pairing_index and sid.
     this.pairingActivateCount += 1;
     this.attemptIndex = this.pairingActivateCount;
-    const method = selectedPairMethod as PairMethod | undefined;
+    const method = pairing?.method;
     const supported = this.descriptors().map((d) => d.method);
     // pairing_psk exactly when the matched PSK is the Pairing PSK, a PIN method otherwise.
     const fitsPsk =
       (method === "pairing_psk") ===
       (this.deps.matchedCategory() === "pairing");
-    if (!method || !fitsPsk || !supported.includes(method)) {
-      this.abort("method_not_supported");
+    if (!method) {
+      // A required field no conformant server omits, so it is a protocol error
+      // rather than a rejection: close without any application-level message.
+      // The log is local, so it still tells the integrator what went wrong.
+      console.warn(
+        "sendspin: server/activate carried no pairing method, so the server is not speaking the current specification.",
+      );
+      this.fail();
       return true;
     }
-    if (PIN_METHODS.includes(method) && this.isLockedOut(method)) {
-      this.abort("locked_out");
+    // A method the PSK disallows or the client no longer offers is something a
+    // conformant server can produce, since its view of the config may be stale.
+    if (!fitsPsk || !supported.includes(method)) {
+      this.abort("method_not_supported");
       return true;
     }
     this.method = method;
@@ -221,51 +264,57 @@ export class PairingManager {
       this.deps.onEvent?.("started");
       return true;
     }
-    this.deps.onEvent?.("started");
     if (method === "dynamic_pin") {
-      this.nonceB = generateNonce();
-      this.phase = "await-init";
-      this.armAttemptTimer();
+      const length = pairing.pin_length;
+      // Same protocol-error treatment as a missing method: pin_length_unacceptable
+      // is defined over a value that is present but out of range.
+      if (typeof length !== "number" || !Number.isInteger(length)) {
+        this.fail();
+        return true;
+      }
+      if (length < this.minPinLength || length > MAX_PIN_DIGITS) {
+        this.abort("pin_length_unacceptable");
+        return true;
+      }
+      this.pinLength = length;
+      this.languages = readLanguages(pairing.languages);
+    }
+    if (this.isGestureGated() && !this.windowOpen) {
+      this.phase = "await-window";
+      // pair-pending does not start the attempt, so no attempt timer runs. The
+      // server bounds the wait and cancels with a non-pairing server/activate.
       this.deps.sendControl({
-        type: "client/pair-init",
-        payload: {
-          pairing_index: this.attemptIndex,
-          commit_B: base64urlEncode(commitNonce(this.nonceB)),
-        },
+        type: "client/pair-pending",
+        payload: { pairing_index: this.attemptIndex },
       });
+      this.deps.onEvent?.("pending");
       return true;
     }
-    // static_pin: the window gesture admits the attempt.
-    if (this.windowOpen) {
-      this.startStaticAttempt();
-    } else {
-      this.phase = "await-window";
-      // Give the operator the window lifetime to make the gesture.
-      this.windowTimer = setTimeout(() => this.fail(), WINDOW_LIFETIME_MS);
-    }
+    this.startAttempt();
     return true;
   }
 
+  /**
+   * Whether the selected method withholds client/pair-init until a window is
+   * open: static PIN always, dynamic PIN when escalated or the PIN is short.
+   */
+  private isGestureGated(): boolean {
+    if (this.method === "static_pin") return true;
+    if (this.method !== "dynamic_pin") return false;
+    return this.isDynamicPinEscalated() || this.pinLength! < SHORT_PIN_LENGTH;
+  }
+
   /** server/pair-init: the server's nonce contribution (dynamic PIN). */
-  onPairInit(payload: { nonce_A?: string; pin_length?: number }): void {
+  onPairInit(payload: { nonce_A?: string }): void {
     // Leftover from an ended attempt (kept-open connection): discard silently.
     if (this.phase === "idle") return;
     if (this.phase !== "await-init" || this.method !== "dynamic_pin") {
       return this.fail();
     }
     const nonceA = this.decode(payload.nonce_A, NONCE_SIZE);
-    const pinLength = payload.pin_length;
-    if (
-      !nonceA ||
-      typeof pinLength !== "number" ||
-      !Number.isInteger(pinLength)
-    )
-      return this.fail();
-    if (pinLength < this.minPinLength || pinLength > MAX_PIN_DIGITS) {
-      return this.abort("pin_length_unacceptable");
-    }
+    if (!nonceA) return this.fail();
     const h = this.deps.handshakeHash();
-    const pin = derivePin(h, nonceA, this.nonceB!, pinLength);
+    const pin = derivePin(h, nonceA, this.nonceB!, this.pinLength!);
     this.currentSid = this.sid(h, this.attemptIndex);
     this.cpace = CPace.start({
       role: "responder",
@@ -275,7 +324,7 @@ export class PairingManager {
       adb: CPACE_AD_B,
     });
     this.phase = "await-auth";
-    this.deps.onPin?.(pin);
+    this.deps.onPin?.(pin, this.languages);
   }
 
   /** server/pair-auth: the server's CPace public share (both PIN methods). */
@@ -304,10 +353,11 @@ export class PairingManager {
     const serverKc = this.decode(payload.server_kc, TAG_SIZE);
     if (!serverKc) return this.fail();
     if (!this.cpace.verify(serverKc)) {
-      this.recordFailure(this.method!);
+      if (this.method === "dynamic_pin") this.recordFailure();
       return this.abort("pin_mismatch");
     }
-    this.resetFailures(this.method!);
+    // Reset on a verified server_kc, whether or not the attempt finalizes.
+    if (this.method === "dynamic_pin") this.resetFailures();
     const confirm: { client_kc: string; nonce_B?: string } = {
       client_kc: base64urlEncode(this.cpace.tag()),
     };
@@ -345,11 +395,23 @@ export class PairingManager {
     this.attemptIndex = 0;
   }
 
-  private startStaticAttempt(): void {
-    this.windowOpen = false; // the window admits exactly one attempt
-    if (this.windowTimer) {
-      clearTimeout(this.windowTimer);
-      this.windowTimer = null;
+  /** Send client/pair-init. The window's lifetime ends here (spec: it runs
+   * from the gesture until client/pair-init is sent). */
+  private startAttempt(): void {
+    this.closeWindow();
+    this.armAttemptTimer();
+    this.deps.onEvent?.("started");
+    if (this.method === "dynamic_pin") {
+      this.nonceB = generateNonce();
+      this.phase = "await-init";
+      this.deps.sendControl({
+        type: "client/pair-init",
+        payload: {
+          pairing_index: this.attemptIndex,
+          commit_B: base64urlEncode(commitNonce(this.nonceB)),
+        },
+      });
+      return;
     }
     const h = this.deps.handshakeHash();
     this.currentSid = this.sid(h, this.attemptIndex);
@@ -361,7 +423,6 @@ export class PairingManager {
       adb: CPACE_AD_B,
     });
     this.phase = "await-auth";
-    this.armAttemptTimer();
     this.deps.sendControl({
       type: "client/pair-init",
       payload: { pairing_index: this.attemptIndex },
@@ -432,9 +493,7 @@ export class PairingManager {
 
   private clearAttempt(): void {
     if (this.attemptTimer) clearTimeout(this.attemptTimer);
-    if (this.windowTimer) clearTimeout(this.windowTimer);
     this.attemptTimer = null;
-    this.windowTimer = null;
     if (this.method && PIN_METHODS.includes(this.method)) {
       this.deps.onPin?.(null);
     }
@@ -444,7 +503,19 @@ export class PairingManager {
     this.cpace = null;
     this.currentSid = null;
     this.nonceB = null;
-    this.windowOpen = false;
+    this.pinLength = null;
+    this.languages = undefined;
+  }
+
+  /**
+   * End an attempt the server walked away from, without sending pair/abort.
+   * The event lets the app drop any "waiting for gesture" UI, which a silent
+   * cancel would otherwise leave up (the server's pair/abort is only a SHOULD).
+   */
+  private abandonAttempt(detail: string): void {
+    if (this.phase === "idle" && !this.pendingPsk) return;
+    this.clearAttempt();
+    this.deps.onEvent?.("aborted", detail);
   }
 
   private decode(value: string | undefined, size: number): Uint8Array | null {
@@ -457,30 +528,31 @@ export class PairingManager {
     }
   }
 
-  private loadFailures(): Partial<Record<PairMethod, number>> {
+  private loadFailures(): number {
     try {
       const raw = this.deps.storage?.getItem(FAILURES_STORAGE_KEY);
-      if (!raw) return {};
-      return JSON.parse(raw) as Partial<Record<PairMethod, number>>;
+      if (!raw) return 0;
+      const stored = JSON.parse(raw) as Partial<Record<PairMethod, number>>;
+      return stored.dynamic_pin ?? 0;
     } catch {
-      return {};
+      return 0;
     }
   }
 
   private saveFailures(): void {
     this.deps.storage?.setItem(
       FAILURES_STORAGE_KEY,
-      JSON.stringify(this.failures),
+      JSON.stringify({ dynamic_pin: this.failures }),
     );
   }
 
-  private recordFailure(method: PairMethod): void {
-    this.failures[method] = (this.failures[method] ?? 0) + 1;
+  private recordFailure(): void {
+    this.failures += 1;
     this.saveFailures();
   }
 
-  private resetFailures(method: PairMethod): void {
-    delete this.failures[method];
+  private resetFailures(): void {
+    this.failures = 0;
     this.saveFailures();
   }
 }
