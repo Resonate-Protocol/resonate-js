@@ -109,9 +109,9 @@ export interface PairingDeps {
   minPinLength?: number;
   /** Enables static_pin: this device's fixed 8-digit PIN. */
   staticPin?: string;
-  /** Where the operator finds the static PIN. Default ["operator"]. */
+  /** Where the operator finds the static PIN. Omitted when unset. */
   staticPinLocations?: PairSecretLocation[];
-  /** Where the operator finds the Pairing PSK. Default ["device"]. */
+  /** Where the operator finds the Pairing PSK. Omitted when unset. */
   pairingPskLocations?: PairSecretLocation[];
   onEvent?(e: PairingEvent, detail?: string): void;
 }

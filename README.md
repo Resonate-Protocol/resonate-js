@@ -223,9 +223,9 @@ player.isDynamicPinEscalated();                  // gesture-gated after 10 failu
 ```
 
 Pairing requires a server speaking the current specification. A non-compliant
-server announces the pairing method in a field this SDK no longer reads, so
-every pairing method (including PIN pairing) aborts with
-`method_not_supported` against it.
+server announces the pairing method in a field this SDK no longer reads, so the
+activation arrives without one and the client closes the connection as a
+protocol error, logging the reason to the console.
 
 `player.pairingToken` is the version 0 token defined by the current specification.
 Identity and pairing require `storage` (defaults to `localStorage`); without
