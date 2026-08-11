@@ -931,6 +931,10 @@ function init() {
   // Load saved settings first
   loadSettings();
 
+  // Voice lists load asynchronously and start out empty, so ask for them now:
+  // by the time a PIN arrives, bestVoice can honor the server's languages.
+  if (typeof speechSynthesis !== "undefined") speechSynthesis.getVoices();
+
   // Load server URL from query params or localStorage
   const serverFromUrl = getServerFromUrl();
   const serverFromStorage = localStorage.getItem(STORAGE_KEYS.SERVER_URL);
