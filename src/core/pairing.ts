@@ -238,15 +238,19 @@ export class PairingManager {
     const fitsPsk =
       (method === "pairing_psk") ===
       (this.deps.matchedCategory() === "pairing");
-    if (!method || !fitsPsk || !supported.includes(method)) {
-      // A missing pairing object is answered rather than closed on, so a server
-      // announcing the method some other way gets a reason it can render
-      // instead of a bare disconnect.
-      if (!pairing) {
-        console.warn(
-          "sendspin: server/activate carried no pairing object, so the server is not speaking the current specification.",
-        );
-      }
+    if (!method) {
+      // A required field no conformant server omits, so it is a protocol error
+      // rather than a rejection: close without any application-level message.
+      // The log is local, so it still tells the integrator what went wrong.
+      console.warn(
+        "sendspin: server/activate carried no pairing method, so the server is not speaking the current specification.",
+      );
+      this.fail();
+      return true;
+    }
+    // A method the PSK disallows or the client no longer offers is something a
+    // conformant server can produce, since its view of the config may be stale.
+    if (!fitsPsk || !supported.includes(method)) {
       this.abort("method_not_supported");
       return true;
     }
@@ -262,8 +266,8 @@ export class PairingManager {
     }
     if (method === "dynamic_pin") {
       const length = pairing.pin_length;
-      // A missing or non-integer pin_length is a malformed field, not a length
-      // the client may reject with a reason.
+      // Same protocol-error treatment as a missing method: pin_length_unacceptable
+      // is defined over a value that is present but out of range.
       if (typeof length !== "number" || !Number.isInteger(length)) {
         this.fail();
         return true;

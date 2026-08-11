@@ -169,11 +169,13 @@ describe("PairingManager (pairing_psk)", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it("aborts a pairing activation with no pairing object", () => {
+  it("fails closed on a pairing activation with no pairing object", () => {
     const { sent, close, mgr } = setup();
+    // A required field no conformant server omits: the abort reasons are all
+    // defined over values that are present, so this is a protocol error.
     mgr.onActivate(["pairing"]);
-    expect(sent[0]!.payload!.reason).toBe("method_not_supported");
-    expect(close).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+    expect(close).toHaveBeenCalled();
   });
 
   it("rejects a PIN method when the matched PSK is the Pairing PSK", () => {
