@@ -587,7 +587,15 @@ function loadSettings() {
   ]) {
     const saved = localStorage.getItem(key);
     if (saved === null) continue;
-    const picked = JSON.parse(saved);
+    // Stored by hand or left over from an older build: fall back to no hint
+    // rather than letting one bad value break the whole panel.
+    let picked = [];
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) picked = parsed;
+    } catch {
+      picked = [];
+    }
     inputs.forEach((input) => {
       input.checked = picked.includes(input.value);
     });
